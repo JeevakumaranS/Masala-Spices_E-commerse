@@ -38,8 +38,10 @@ This folder name (`Masala&Spices_E-commerse`) contains an ampersand, which break
    the path is expanded unquoted, so `npm --prefix "E:\Projects\Masala&Spices_E-commerse\frontend" run dev`
    works while a bare `cd` + `npm run` in some shells does not.
 
-The backend has no such issue once you are inside `backend/`:
-`.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000`
+For local development without Docker, run the backend from `backend/` with
+`.venv\Scripts\python.exe -m uvicorn app.main:app --port 8080`. The frontend
+defaults to `http://localhost:8080` for its API. The Docker Compose setup above
+uses port 8000 and configures the container frontend separately.
 
 ## ISR revalidation note
 
@@ -47,4 +49,4 @@ Admin updates should trigger on-demand revalidation from the admin write flow (f
 
 ## Scope note
 
-This initial build focuses on the project shell, data contracts, and the SEO-critical storefront routes (`/`, collection pages, PDPs, recipes, blogs, and order lookup). The backend includes the main CRUD endpoints and sample seed data for local development. Guest cart and checkout now include server-validated starter promos, domestic shipping thresholds, and a configurable “Flying Abroad” shipping matrix. Automated order confirmation email/SMS/WhatsApp notifications are intentionally deferred; the checkout shows the order reference and routes payment confirmation through the admin by phone.
+This initial build focuses on the project shell, data contracts, and the SEO-critical storefront routes (`/`, collection pages, PDPs, recipes, blogs, and order lookup). The backend includes the main CRUD endpoints and sample seed data for local development. Guest cart and checkout now include server-validated starter promos, domestic shipping thresholds, and a configurable “Flying Abroad” shipping matrix. Order confirmation emails can be sent through Brevo transactional email and SMS confirmations through Twilio when configured in the admin API settings; WhatsApp delivery is not integrated. The checkout shows the order reference and routes payment confirmation through the admin by phone.

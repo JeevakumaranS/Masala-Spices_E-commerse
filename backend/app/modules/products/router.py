@@ -1,16 +1,19 @@
 """Product and product-review routes."""
 
 from typing import Any
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import insert, select
+from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, products_table, reviews_table, variants_table
 from app.modules.products.schemas import (
     PaginatedProducts,
     Product,
+    ProductReview,
     ReviewSubmission,
+    ReviewSubmissionResponse,
 )
 
 router = APIRouter(prefix="/api/products", tags=["products"])
@@ -32,10 +35,10 @@ async def list_products(
     page_size: int = 12,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    result = await db.execute(select(products_table).order_by(products_table.c.id))
+    result = await db.execute(select(products_table).order_by(products_table.c.name))
     filtered = [dict(row) for row in result.mappings()]
     if category:
-        filtered = [item for item in filtered if category in item["categories"]]
+        filtered = [item for item in filtered if category in (item.get("categories") or [])]
     if spice_level:
         filtered = [item for item in filtered if item["spice_level"].lower() == spice_level.lower()]
     if dish_type:
@@ -92,7 +95,7 @@ async def hydrate_products(db: AsyncSession, products: list[dict[str, Any]]) -> 
     result = await db.execute(
         select(variants_table).where(variants_table.c.product_id.in_(ids))
     )
-    variants_by_product: dict[int, list[dict[str, Any]]] = {}
+    variants_by_product: dict[str, list[dict[str, Any]]] = {}
     for row in result.mappings():
         variant = dict(row)
         if variant.get("expiry_date"):
@@ -102,32 +105,59 @@ async def hydrate_products(db: AsyncSession, products: list[dict[str, Any]]) -> 
         product["variants"] = variants_by_product.get(product["id"], [])
         product["ingredients"] = product.get("ingredients") or []
         product["categories"] = product.get("categories") or []
-        product["images"] = product.get("images") or []
+        product["images"] = [
+            {
+                "id": f"{product['id']}:{index}",
+                "url": image,
+                "alt_text": product["name"],
+                "sort_order": index,
+                "image_type": "pack_shot" if index == 0 else "gallery",
+            }
+            for index, image in enumerate(product.get("images") or [])
+        ]
     return products
 
 
 @router.get("/{product_id}/reviews")
 async def get_product_reviews(
-    product_id: int,
+    product_id: UUID,
+    limit: int = Query(default=3, ge=1, le=50),
+    offset: int = Query(default=0, ge=0),
     db: AsyncSession = Depends(get_db),
-) -> dict[str, list[dict[str, Any]]]:
+) -> dict[str, Any]:
     product = await db.execute(select(products_table.c.id).where(products_table.c.id == product_id))
     if product.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Product not found")
+
+    filters = (reviews_table.c.product_id == product_id, reviews_table.c.status == "approved")
+    summary = await db.execute(
+        select(
+            func.count(reviews_table.c.id),
+            func.avg(reviews_table.c.rating),
+        ).where(*filters)
+    )
+    total_count, average_rating = summary.one()
+
     result = await db.execute(
         select(reviews_table)
-        .where(reviews_table.c.product_id == product_id, reviews_table.c.status == "approved")
+        .where(*filters)
         .order_by(reviews_table.c.created_at.desc())
+        .limit(limit)
+        .offset(offset)
     )
-    return {"items": [dict(row) for row in result.mappings()]}
+    return {
+        "items": [dict(row) for row in result.mappings()],
+        "total_count": total_count,
+        "average_rating": float(average_rating) if average_rating is not None else 0,
+    }
 
 
-@router.post("/{product_id}/reviews")
+@router.post("/{product_id}/reviews", response_model=ReviewSubmissionResponse)
 async def submit_review(
-    product_id: int,
+    product_id: UUID,
     payload: ReviewSubmission,
     db: AsyncSession = Depends(get_db),
-) -> dict[str, str | int]:
+) -> dict[str, Any]:
     product = await db.execute(select(products_table.c.id).where(products_table.c.id == product_id))
     if product.scalar_one_or_none() is None:
         raise HTTPException(status_code=404, detail="Product not found")

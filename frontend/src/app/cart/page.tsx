@@ -188,52 +188,49 @@ export default function CartPage() {
           /* ---- Line items + sticky summary ---- */
           <div className={GRID}>
             <Reveal>
-              <ul className="card divide-y divide-paper-100 overflow-hidden">
+              <ul className="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
                 {lines.map((line) => {
                   const pdp = `/collections/${line.category}/products/${line.slug}`;
 
                   return (
-                    <li key={line.key} className="flex gap-4 p-4 sm:gap-5 sm:p-5">
-                      <Link href={pdp} className="block shrink-0">
+                    <li key={line.key} className="group relative flex flex-col rounded-2xl border border-paper-200 bg-white p-4 transition hover:border-paper-300 hover:shadow-md">
+                      <button
+                        type="button"
+                        onClick={() => remove(line.key)}
+                        aria-label={`Remove ${line.name} from cart`}
+                        className="absolute top-3 right-3 z-10 grid size-8 place-items-center rounded-full bg-white/90 text-ink-400 opacity-0 shadow-sm transition group-hover:opacity-100 hover:bg-chili-50 hover:text-chili-600"
+                      >
+                        <TrashIcon className="size-4" />
+                      </button>
+
+                      <Link href={pdp} className="block">
                         <SmartImage
                           src={line.image}
                           alt={line.name}
                           aspect="aspect-square"
-                          sizes="96px"
-                          wrapperClassName="w-20 rounded-xl border border-paper-200 sm:w-24"
+                          sizes="160px"
+                          wrapperClassName="w-full rounded-xl border border-paper-100"
                         />
                       </Link>
 
-                      <div className="min-w-0 flex-1">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <Link
-                              href={pdp}
-                              className="text-sm font-semibold text-ink-950 transition hover:text-masala-700 sm:text-base"
-                            >
-                              {line.name}
-                            </Link>
-                            <p className="mt-1 text-xs text-ink-500">{line.packSize}</p>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => remove(line.key)}
-                            aria-label={`Remove ${line.name} from cart`}
-                            className="btn btn-ghost btn-icon btn-sm shrink-0"
-                          >
-                            <TrashIcon className="size-4" />
-                          </button>
-                        </div>
+                      <div className="mt-3 flex flex-1 flex-col">
+                        <Link
+                          href={pdp}
+                          className="line-clamp-2 text-sm font-semibold text-ink-950 transition hover:text-masala-700"
+                        >
+                          {line.name}
+                        </Link>
+                        <p className="mt-1 text-xs text-ink-500">{line.packSize}</p>
 
-                        <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+                        <div className="mt-auto pt-3">
                           <QuantityStepper
                             value={line.qty}
                             max={line.maxQty}
                             onChange={(next) => setQty(line.key, next)}
                             label={`Quantity for ${line.name}`}
                           />
-                          <div className="ml-auto text-right">
-                            <p className="font-display text-base font-semibold text-ink-950 sm:text-lg">
+                          <div className="mt-3 text-center">
+                            <p className="font-display text-base font-semibold text-ink-950">
                               {formatINR(line.price * line.qty)}
                             </p>
                             {line.mrp > line.price ? (

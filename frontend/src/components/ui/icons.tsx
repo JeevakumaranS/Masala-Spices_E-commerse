@@ -172,6 +172,21 @@ export const ShieldIcon = (p: IconProps) => (
   </Base>
 );
 
+export const EyeIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6-9.5-6Z" />
+    <circle cx="12" cy="12" r="2.5" />
+  </Base>
+);
+
+export const EyeOffIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="m3 3 18 18" />
+    <path d="M10.6 6.2A10.8 10.8 0 0 1 12 6c6.2 0 9.5 6 9.5 6a15.7 15.7 0 0 1-3.1 3.7M6.2 6.7C3.8 8.2 2.5 12 2.5 12s3.3 6 9.5 6c1 0 2-.2 2.8-.5" />
+    <path d="M9.9 9.9a3 3 0 0 0 4.2 4.2" />
+  </Base>
+);
+
 export const RefreshIcon = (p: IconProps) => (
   <Base {...p}>
     <path d="M20 11.5A8 8 0 0 0 6.3 6.3L3.5 9" />
@@ -300,5 +315,16 @@ export const YoutubeIcon = (p: IconProps) => (
   <Base {...p}>
     <rect x="2.8" y="6" width="18.4" height="12" rx="4" />
     <path d="m10.5 9.8 4.5 2.4-4.5 2.4V9.8Z" fill="currentColor" stroke="none" />
+  </Base>
+);
+
+export const WhatsAppIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M12 2a10 10 0 0 0-8.6 15.1L2 22l5-1.3A10 10 0 1 0 12 2Z" />
+    <path
+      d="M8.5 8.2c.3-.7.6-.7 1-.7.3 0 .6 0 .8.6l.7 1.6c.1.2 0 .5-.2.7l-.5.6c-.1.2-.1.4 0 .6.5.9 1.3 1.6 2.3 2.1.2.1.4.1.6-.1l.7-.7c.2-.2.5-.3.7-.2l1.6.8c.5.3.6.5.6.8 0 .6-.4 1.2-1 1.5-.6.3-1.3.4-2.1.2-2.5-.7-4.6-2.3-5.7-4.7-.3-.7-.3-1.4 0-2Z"
+      fill="currentColor"
+      stroke="none"
+    />
   </Base>
 );

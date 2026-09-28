@@ -1,10 +1,10 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import type { BlogPost } from "@/lib/types";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Reveal } from "@/components/ui/Reveal";
 import { SmartImage } from "@/components/ui/SmartImage";
 import { ArrowRightIcon, SparkleIcon } from "@/components/ui/icons";
+import { getBlogPosts } from "@/lib/blog-api";
 
 export const revalidate = 600;
 
@@ -14,22 +14,8 @@ export const metadata: Metadata = {
     "Stories from the roastery, pantry guides and the recipes behind our blends — written by the people who grind the masala.",
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-/** The blog API has no client helper yet — and it must never crash the page. */
-async function fetchBlogPosts(): Promise<BlogPost[]> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/blog`, { next: { revalidate: 600 } });
-    if (!res.ok) return [];
-    const data: unknown = await res.json();
-    return Array.isArray(data) ? (data as BlogPost[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 export default async function BlogPage() {
-  const posts = await fetchBlogPosts();
+  const posts = await getBlogPosts();
 
   return (
     <>

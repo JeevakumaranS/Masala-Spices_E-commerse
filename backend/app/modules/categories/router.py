@@ -12,7 +12,7 @@ router = APIRouter(prefix="/api/categories", tags=["categories"])
 
 @router.get("", response_model=list[Category])
 async def list_categories(db: AsyncSession = Depends(get_db)) -> list[dict]:
-    result = await db.execute(select(categories_table).order_by(categories_table.c.id))
+    result = await db.execute(select(categories_table).order_by(categories_table.c.name))
     return [dict(row) for row in result.mappings()]
 
 

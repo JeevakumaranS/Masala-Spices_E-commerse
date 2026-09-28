@@ -1,5 +1,5 @@
 export type Category = {
-  id: number;
+  id: string;
   name: string;
   slug: string;
   type: string;
@@ -7,7 +7,7 @@ export type Category = {
 };
 
 export type ProductImage = {
-  id: number;
+  id: string;
   url: string;
   alt_text: string;
   sort_order: number;
@@ -15,7 +15,7 @@ export type ProductImage = {
 };
 
 export type ProductVariant = {
-  id: number;
+  id: string;
   pack_size: string;
   price: number;
   mrp: number;
@@ -26,7 +26,7 @@ export type ProductVariant = {
 };
 
 export type Product = {
-  id: number;
+  id: string;
   name: string;
   slug: string;
   description: string;
@@ -57,7 +57,7 @@ export type Product = {
 };
 
 export type Recipe = {
-  id: number;
+  id: string;
   title: string;
   slug: string;
   cook_time_minutes: number;
@@ -71,7 +71,7 @@ export type Recipe = {
 
 export type BlogPost = {
   /** Only returned by the list endpoint (`GET /api/blog`). */
-  id?: number;
+  id?: string;
   title: string;
   slug: string;
   hero_image_url?: string | null;

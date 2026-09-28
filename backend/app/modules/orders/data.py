@@ -9,7 +9,6 @@ from typing import Any
 
 sample_orders: list[dict[str, Any]] = [
     {
-        "id": 1,
         "order_number": "MAS-1001",
         "customer_name": "Aisha Nair",
         "phone": "+919876543210",
@@ -23,13 +22,11 @@ sample_orders: list[dict[str, Any]] = [
         "item_count": 2,
         "history": [
             {
-                "id": 1,
                 "status": "placed",
                 "changed_at": datetime.utcnow() - timedelta(days=2),
                 "note": "Order placed",
             },
             {
-                "id": 2,
                 "status": "confirmed",
                 "changed_at": datetime.utcnow() - timedelta(days=1),
                 "note": "Confirmed by admin",

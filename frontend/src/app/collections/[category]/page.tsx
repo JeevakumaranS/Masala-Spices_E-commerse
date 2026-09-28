@@ -58,7 +58,7 @@ function sortProducts(products: Product[], sort: SortKey): Product[] {
       return list.sort((a, b) => b.price - a.price);
     case "newest":
       // The API exposes no timestamp — catalogue id order doubles as newest-first.
-      return list.sort((a, b) => b.id - a.id);
+      return list.sort((a, b) => b.id.localeCompare(a.id));
     default:
       return list;
   }
@@ -146,7 +146,7 @@ export default async function CategoryPage({ params, searchParams }: Props) {
               />
             </div>
           ) : (
-            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
               {visible.map((product, index) => (
                 <Reveal key={product.id} delay={(index % 3) * 80} className="h-full">
                   <ProductCard

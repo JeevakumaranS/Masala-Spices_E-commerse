@@ -2,44 +2,50 @@
 
 import { FormEvent, useEffect, useState } from "react";
 import { StarIcon } from "@/components/ui/icons";
+import { apiClient, getApiErrorMessage } from "@/lib/http";
 import type { Product } from "@/lib/types";
 
 type Review = {
-  id: number;
+  id: string;
   reviewer_name: string;
   rating: number;
   comment: string;
   created_at: string;
 };
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
 export function ProductReviews({ product }: { product: Product }) {
+  const pageSize = 3;
   const [rating, setRating] = useState(0);
   const [reviewerName, setReviewerName] = useState("");
   const [comment, setComment] = useState("");
   const [reviews, setReviews] = useState<Review[]>([]);
+  const [totalReviews, setTotalReviews] = useState(0);
+  const [averageRating, setAverageRating] = useState(0);
   const [loadError, setLoadError] = useState("");
+  const [loadingMore, setLoadingMore] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
-  const average = reviews.length
-    ? reviews.reduce((total, review) => total + review.rating, 0) / reviews.length
-    : 0;
-
   useEffect(() => {
     let cancelled = false;
     const loadReviews = async () => {
       try {
-        const response = await fetch(`${API_BASE_URL}/api/products/${product.id}/reviews`, {
-          cache: "no-store",
-        });
-        if (!response.ok) throw new Error(`Reviews could not be loaded (${response.status}).`);
-        const payload = (await response.json()) as { items?: Review[] };
-        if (!cancelled) setReviews(payload.items ?? []);
+        const response = await apiClient.get<{
+          items?: Review[];
+          total_count?: number;
+          average_rating?: number;
+        }>(
+          `/api/products/${product.id}/reviews`,
+          { params: { limit: pageSize, offset: 0 } },
+        );
+        if (!cancelled) {
+          setReviews(response.data.items ?? []);
+          setTotalReviews(response.data.total_count ?? 0);
+          setAverageRating(response.data.average_rating ?? 0);
+        }
       } catch (error) {
         if (!cancelled) {
-          setLoadError(error instanceof Error ? error.message : "Reviews could not be loaded.");
+          setLoadError(getApiErrorMessage(error, "Reviews could not be loaded."));
         }
       }
     };
@@ -47,7 +53,23 @@ export function ProductReviews({ product }: { product: Product }) {
     return () => {
       cancelled = true;
     };
-  }, [product.id]);
+  }, [pageSize, product.id]);
+
+  const showMoreReviews = async () => {
+    setLoadingMore(true);
+    setLoadError("");
+    try {
+      const response = await apiClient.get<{ items?: Review[] }>(
+        `/api/products/${product.id}/reviews`,
+        { params: { limit: pageSize, offset: reviews.length } },
+      );
+      setReviews((current) => [...current, ...(response.data.items ?? [])]);
+    } catch (error) {
+      setLoadError(getApiErrorMessage(error, "More reviews could not be loaded."));
+    } finally {
+      setLoadingMore(false);
+    }
+  };
 
   const submitReview = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -55,31 +77,17 @@ export function ProductReviews({ product }: { product: Product }) {
     setSubmitError("");
     setNotice("");
     try {
-      const response = await fetch(`${API_BASE_URL}/api/products/${product.id}/reviews`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          reviewer_name: reviewerName.trim(),
-          rating,
-          comment: comment.trim(),
-        }),
+      await apiClient.post(`/api/products/${product.id}/reviews`, {
+      reviewer_name: reviewerName.trim(),
+      rating,
+      comment: comment.trim(),
       });
-      if (!response.ok) {
-        let message = `Review could not be submitted (${response.status}).`;
-        try {
-          const error = (await response.json()) as { detail?: string };
-          message = error.detail ?? message;
-        } catch {
-          // Keep the response status message when the server did not return JSON.
-        }
-        throw new Error(message);
-      }
       setNotice("Thank you — your review has been submitted for moderation.");
       setReviewerName("");
       setComment("");
       setRating(0);
     } catch (error) {
-      setSubmitError(error instanceof Error ? error.message : "Review could not be submitted.");
+      setSubmitError(getApiErrorMessage(error, "Review could not be submitted."));
     } finally {
       setSubmitting(false);
     }
@@ -93,16 +101,16 @@ export function ProductReviews({ product }: { product: Product }) {
           <h2 className="section-title mt-3">What the kitchen says</h2>
           <div className="mt-6 flex items-center gap-4">
             <span className="font-display text-5xl font-semibold text-ink-950">
-              {average ? average.toFixed(1) : "—"}
+              {averageRating ? averageRating.toFixed(1) : "—"}
             </span>
             <div>
-              <div className="flex gap-0.5 text-saffron-500" aria-label={`${average.toFixed(1)} out of 5 stars`}>
+              <div className="flex gap-0.5 text-saffron-500" aria-label={`${averageRating.toFixed(1)} out of 5 stars`}>
                 {[1, 2, 3, 4, 5].map((star) => (
-                  <StarIcon key={star} className={star <= Math.round(average) ? "size-5 fill-current" : "size-5"} />
+                  <StarIcon key={star} className={star <= Math.round(averageRating) ? "size-5 fill-current" : "size-5"} />
                 ))}
               </div>
               <p className="mt-1 text-sm text-ink-500">
-                {reviews.length ? `${reviews.length} verified reviews` : "Be the first to review this blend"}
+                {totalReviews ? `${totalReviews} verified reviews` : "Be the first to review this blend"}
               </p>
             </div>
           </div>
@@ -120,6 +128,16 @@ export function ProductReviews({ product }: { product: Product }) {
                 </li>
               ))}
             </ul>
+          ) : null}
+          {reviews.length < totalReviews ? (
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm mt-5"
+              onClick={() => void showMoreReviews()}
+              disabled={loadingMore}
+            >
+              {loadingMore ? "Loading reviews…" : "Show more"}
+            </button>
           ) : null}
         </div>
 

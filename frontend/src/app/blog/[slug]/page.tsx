@@ -1,36 +1,23 @@
 import Link from "next/link";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import type { BlogPost } from "@/lib/types";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { Reveal } from "@/components/ui/Reveal";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SmartImage } from "@/components/ui/SmartImage";
 import { ArrowLeftIcon, ArrowRightIcon } from "@/components/ui/icons";
+import { getBlogPost, getBlogPosts } from "@/lib/blog-api";
 
 export const revalidate = 600;
 
-/**
- * Look the post up during metadata generation — it resolves before the HTML
- * stream starts, so a dead link returns a genuine HTTP 404. (With the root
- * `loading.tsx` streaming early, a page-level `notFound()` can only inject
- * `noindex`, not change the status.) The fetch URL and options match the page
- * component exactly, so Next dedupes them into one request.
- */
+/** Resolve the post before HTML streaming so missing posts return a real 404. */
 export async function generateMetadata({
   params,
 }: {
   params: Promise<{ slug: string }>;
 }): Promise<Metadata> {
   const { slug } = await params;
-
-  let post: BlogPost | null = null;
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/blog/${slug}`, { next: { revalidate: 600 } });
-    if (res.ok) post = (await res.json()) as BlogPost;
-  } catch {
-    post = null;
-  }
+  const post = await getBlogPost(slug);
   if (!post) notFound();
 
   const firstParagraph = (post.body ?? "").split(/\n+/)[0]?.trim() ?? "";
@@ -43,20 +30,6 @@ export async function generateMetadata({
   };
 }
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
-
-/** Fails soft to `[]` so a backend hiccup never takes the page down. */
-async function fetchBlogPosts(): Promise<BlogPost[]> {
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/blog`, { next: { revalidate: 600 } });
-    if (!res.ok) return [];
-    const data: unknown = await res.json();
-    return Array.isArray(data) ? (data as BlogPost[]) : [];
-  } catch {
-    return [];
-  }
-}
-
 function formatPublishDate(value?: string | null): string | null {
   if (!value) return null;
   const date = new Date(value);
@@ -66,17 +39,7 @@ function formatPublishDate(value?: string | null): string | null {
 
 export default async function BlogPostPage({ params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-
-  let post: BlogPost | null = null;
-  try {
-    const res = await fetch(`${API_BASE_URL}/api/blog/${slug}`, { next: { revalidate: 600 } });
-    if (res.ok) {
-      post = (await res.json()) as BlogPost;
-    }
-  } catch {
-    post = null;
-  }
-
+  const post = await getBlogPost(slug);
   if (!post) {
     notFound();
   }
@@ -92,7 +55,7 @@ export default async function BlogPostPage({ params }: { params: Promise<{ slug:
     .filter(Boolean)
     .join(" · ");
 
-  const morePosts = (await fetchBlogPosts())
+  const morePosts = (await getBlogPosts())
     .filter((item) => item.slug !== slug)
     .slice(0, 3);
 

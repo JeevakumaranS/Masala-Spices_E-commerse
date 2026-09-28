@@ -1,6 +1,5 @@
 import type { CartLine } from "@/store/cart";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { apiClient, getApiErrorMessage } from "@/lib/http";
 
 type PromoRule = {
   kind: "percent" | "seasonal" | "biryani-bundle";
@@ -108,29 +107,27 @@ export async function validatePromoCode(
   lines: CartLine[],
 ): Promise<PromoValidation> {
   const normalized = code.trim().toUpperCase();
-  let response: Response;
+  let payload: Partial<PromoValidation> & { detail?: string };
   try {
-    response = await fetch(`${API_URL}/api/coupons/validate`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
+    const response = await apiClient.post<Partial<PromoValidation> & { detail?: string }>(
+      "/api/coupons/validate",
+      {
         code: normalized,
         items: lines.map((line) => ({
           product_id: line.id,
           variant_id: line.variantId ?? 0,
           qty: line.qty,
         })),
-      }),
-    });
-  } catch {
-    throw new Error("We couldn't check that code right now. Please try again in a moment.");
-  }
-
-  const payload = (await response.json().catch(() => null)) as
-    | (Partial<PromoValidation> & { detail?: string })
-    | null;
-  if (!response.ok || !payload) {
-    throw new Error(payload?.detail ?? "We couldn't validate that promo code.");
+      },
+    );
+    payload = response.data;
+  } catch (error) {
+    throw new Error(
+      getApiErrorMessage(
+        error,
+        "We couldn't check that code right now. Please try again in a moment.",
+      ),
+    );
   }
 
   return {

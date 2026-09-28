@@ -9,6 +9,7 @@ import type { Category } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { selectCount, useCartHydrated, useCartStore } from "@/store/cart";
 import { useUIStore } from "@/store/ui";
+import { PROMO_RULES } from "@/lib/promos";
 import {
   BagIcon,
   ChevronDownIcon,
@@ -19,11 +20,18 @@ import {
   PhoneIcon,
 } from "@/components/ui/icons";
 
-const ANNOUNCEMENTS = [
-  "Free shipping on orders over ₹349",
-  "Ground fresh every Tuesday — never older than 14 days",
-  "Bulk & export enquiries welcome",
-];
+function getActivePromotions(): string[] {
+  const today = new Date();
+  const active: string[] = [];
+  for (const rule of Object.values(PROMO_RULES)) {
+    if (rule.activeFrom && today < new Date(`${rule.activeFrom}T00:00:00`)) continue;
+    if (rule.activeUntil && today > new Date(`${rule.activeUntil}T23:59:59`)) continue;
+    active.push(rule.blurb);
+  }
+  return active.length
+    ? active
+    : ["Free shipping on orders over ₹349", "Ground fresh every Tuesday — never older than 14 days"];
+}
 
 const FALLBACK_CATEGORIES: Pick<Category, "name" | "slug">[] = [
   { name: "Breakfast Masalas", slug: "breakfast-masalas" },
@@ -108,13 +116,14 @@ export function Header() {
   }, []);
 
   /* ---- rotating announcement ---- */
+  const promotions = getActivePromotions();
   useEffect(() => {
     const id = window.setInterval(
-      () => setAnnouncement((i) => (i + 1) % ANNOUNCEMENTS.length),
+      () => setAnnouncement((i) => (i + 1) % promotions.length),
       5000,
     );
     return () => window.clearInterval(id);
-  }, []);
+  }, [promotions.length]);
 
   /* ---- close overlays on navigation ---- */
   useEffect(() => {
@@ -201,7 +210,7 @@ export function Header() {
             key={announcement}
             className="truncate text-center text-[0.7rem] font-medium tracking-[0.14em] uppercase animate-fade-in sm:text-[0.75rem]"
           >
-            {ANNOUNCEMENTS[announcement]}
+            {promotions[announcement]}
           </p>
         </div>
         <div

@@ -8,7 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.phone import phone_digits
-from app.core.database import get_db, orders_table
+from app.core.database import get_db, order_items_table, orders_table
 from app.modules.admin.auth import require_admin
 from app.modules.analytics.schemas import AnalyticsSummary
 
@@ -19,9 +19,24 @@ admin_router = APIRouter(prefix="/api/admin/analytics", tags=["admin", "analytic
 @router.get("/summary", response_model=AnalyticsSummary, dependencies=[Depends(require_admin)])
 @admin_router.get("/summary", response_model=AnalyticsSummary, dependencies=[Depends(require_admin)])
 async def analytics_summary(db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
-    result = await db.execute(select(orders_table.c.order_data))
-    orders = [row[0] for row in result]
-    accepted = [order for order in orders if order.get("status") in {"confirmed", "shipped"}]
+    # Fetch orders
+    orders_result = await db.execute(select(orders_table))
+    orders = [dict(row) for row in orders_result.mappings()]
+
+    # Fetch order items
+    items_result = await db.execute(select(order_items_table))
+    all_items = [dict(row) for row in items_result.mappings()]
+
+    # Group items by order_id
+    items_by_order: dict[str, list[dict[str, Any]]] = {}
+    for item in all_items:
+        items_by_order.setdefault(item["order_id"], []).append(item)
+
+    accepted = [
+        order
+        for order in orders
+        if order.get("status") in {"processing", "shipped", "delivered"}
+    ]
     total_revenue = sum(float(order.get("total") or 0) for order in accepted)
     customer_keys = []
     for order in orders:
@@ -45,12 +60,12 @@ async def analytics_summary(db: AsyncSession = Depends(get_db)) -> dict[str, Any
     item_revenue: Counter[str] = Counter()
     for order in orders:
         region = str(order.get("state") or order.get("city") or "Unknown")
-        order_items = order.get("items", [])
+        order_items = items_by_order.get(order["id"], [])
         gross_items = sum(
             float(item.get("line_total") or float(item.get("price") or 0) * int(item.get("qty") or 0))
             for item in order_items
         )
-        for item in order.get("items", []):
+        for item in order_items:
             count = int(item.get("qty") or 0)
             line_revenue = float(
                 item.get("line_total") or float(item.get("price") or 0) * count

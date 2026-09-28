@@ -73,7 +73,7 @@ export default async function HomePage() {
 
   const bestsellers = products.slice(0, 6);
   const featuredCategories = categories.slice(0, 3);
-  const featuredRecipes = recipes.slice(0, 3);
+  const featuredRecipes = recipes.slice(0, 4);
 
   return (
     <>
@@ -135,7 +135,7 @@ export default async function HomePage() {
             />
           </div>
         ) : (
-          <div className="mt-8 grid gap-5 md:grid-cols-3">
+          <div className="mt-8 grid grid-cols-2 gap-5 md:grid-cols-3 lg:grid-cols-4">
             {featuredCategories.map((category, index) => (
               <Reveal key={category.slug} delay={index * 90}>
                 <Link
@@ -192,7 +192,7 @@ export default async function HomePage() {
               />
             </div>
           ) : (
-            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {bestsellers.map((product, index) => (
                 <Reveal key={product.id} delay={(index % 3) * 80} className="h-full">
                   <ProductCard

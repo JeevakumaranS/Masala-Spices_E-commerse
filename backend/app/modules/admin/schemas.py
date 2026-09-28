@@ -18,7 +18,6 @@ class LoginRequest(BaseModel):
 class RegisterAdminRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254)
     password: str = Field(min_length=12, max_length=128)
-    bootstrap_secret: str | None = Field(default=None, min_length=1, max_length=256)
 
     @field_validator("email")
     @classmethod

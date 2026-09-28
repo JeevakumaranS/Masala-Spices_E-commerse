@@ -160,68 +160,69 @@ export function CartDrawer() {
               )}
             </div>
 
-            <ul className="flex-1 divide-y divide-paper-100 overflow-y-auto px-5">
-              {lines.map((line) => (
-                <li key={line.key} className="flex gap-4 py-4">
-                  <Link
-                    href={`/collections/${line.category}/products/${line.slug}`}
-                    onClick={close}
-                    className="shrink-0"
-                  >
-                    <SmartImage
-                      src={line.image}
-                      alt={line.name}
-                      aspect="aspect-square"
-                      sizes="72px"
-                      wrapperClassName="w-16 rounded-xl border border-paper-200"
-                    />
-                  </Link>
+            <div className="flex-1 overflow-y-auto p-4">
+              <ul className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
+                {lines.map((line) => (
+                  <li key={line.key} className="group relative flex flex-col rounded-2xl border border-paper-200 bg-white p-3 transition hover:border-paper-300 hover:shadow-md">
+                    <button
+                      type="button"
+                      onClick={() => remove(line.key)}
+                      aria-label={`Remove ${line.name} from cart`}
+                      className="absolute top-2 right-2 z-10 grid size-7 place-items-center rounded-full bg-white/90 text-ink-400 opacity-0 shadow-sm transition group-hover:opacity-100 hover:bg-chili-50 hover:text-chili-600"
+                    >
+                      <TrashIcon className="size-3.5" />
+                    </button>
 
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <Link
-                          href={`/collections/${line.category}/products/${line.slug}`}
-                          onClick={close}
-                          className="block truncate text-sm font-semibold text-ink-950 hover:text-masala-700"
-                        >
-                          {line.name}
-                        </Link>
-                        <p className="mt-0.5 text-xs text-ink-500">{line.packSize}</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => remove(line.key)}
-                        aria-label={`Remove ${line.name} from cart`}
-                        className="grid size-7 shrink-0 place-items-center rounded-full text-ink-400 transition hover:bg-chili-50 hover:text-chili-600"
-                      >
-                        <TrashIcon className="size-4" />
-                      </button>
-                    </div>
-
-                    <div className="mt-3 flex items-center justify-between gap-3">
-                      <QuantityStepper
-                        size="sm"
-                        value={line.qty}
-                        max={line.maxQty}
-                        onChange={(next) => setQty(line.key, next)}
-                        label={`Quantity for ${line.name}`}
+                    <Link
+                      href={`/collections/${line.category}/products/${line.slug}`}
+                      onClick={close}
+                      className="block"
+                    >
+                      <SmartImage
+                        src={line.image}
+                        alt={line.name}
+                        aspect="aspect-square"
+                        sizes="120px"
+                        wrapperClassName="w-full rounded-xl border border-paper-100"
                       />
-                      <div className="text-right">
-                        <p className="text-sm font-bold text-ink-950">
-                          {formatINR(line.price * line.qty)}
-                        </p>
-                        {line.mrp > line.price ? (
-                          <p className="text-xs text-ink-400 line-through">
-                            {formatINR(line.mrp * line.qty)}
+                    </Link>
+
+                    <div className="mt-2.5 flex flex-1 flex-col">
+                      <Link
+                        href={`/collections/${line.category}/products/${line.slug}`}
+                        onClick={close}
+                        className="line-clamp-2 text-xs font-semibold text-ink-950 hover:text-masala-700"
+                      >
+                        {line.name}
+                      </Link>
+                      <p className="mt-0.5 text-[0.65rem] text-ink-500">{line.packSize}</p>
+
+                      <div className="mt-auto pt-2.5">
+                        <div className="flex items-center justify-between gap-2">
+                          <QuantityStepper
+                            size="sm"
+                            value={line.qty}
+                            max={line.maxQty}
+                            onChange={(next) => setQty(line.key, next)}
+                            label={`Quantity for ${line.name}`}
+                          />
+                        </div>
+                        <div className="mt-2 text-center">
+                          <p className="text-sm font-bold text-ink-950">
+                            {formatINR(line.price * line.qty)}
                           </p>
-                        ) : null}
+                          {line.mrp > line.price ? (
+                            <p className="text-[0.65rem] text-ink-400 line-through">
+                              {formatINR(line.mrp * line.qty)}
+                            </p>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
-                  </div>
-                </li>
-              ))}
-            </ul>
+                  </li>
+                ))}
+              </ul>
+            </div>
 
             <footer className="border-t border-paper-200 bg-paper-50 px-5 py-4">
               <div className="flex items-center justify-between text-sm">

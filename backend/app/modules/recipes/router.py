@@ -18,7 +18,7 @@ async def list_recipes(
     dish_type: str | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    query = select(recipes_table).order_by(recipes_table.c.id)
+    query = select(recipes_table).order_by(recipes_table.c.title)
     result = await db.execute(query)
     filtered = [dict(row) for row in result.mappings()]
     if cuisine:

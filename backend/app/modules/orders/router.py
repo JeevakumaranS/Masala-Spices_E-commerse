@@ -8,7 +8,7 @@ from typing import Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import String, insert, select, update
+from sqlalchemy import String, insert, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.phone import (
@@ -17,7 +17,13 @@ from app.common.phone import (
     phone_digits,
     phone_numbers_match,
 )
-from app.core.database import coupons_table, get_db, orders_table
+from app.core.database import (
+    coupons_table,
+    get_db,
+    order_history_table,
+    order_items_table,
+    orders_table,
+)
 from app.modules.coupons.service import (
     CouponValidationError,
     calculate_managed_coupon,
@@ -30,6 +36,7 @@ from app.modules.orders.shipping import (
     get_international_destination,
     shipping_options_payload,
 )
+from app.modules.notifications.brevo import send_order_confirmation_email
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -90,7 +97,7 @@ async def create_order(
                 select(coupons_table).where(coupons_table.c.code == payload.coupon_code)
             )
             managed = managed_result.mappings().first()
-            prior_result = await db.execute(select(orders_table.c.order_data))
+            prior_result = await db.execute(select(orders_table.c.id))
             previous_orders = [row[0] for row in prior_result]
             if managed is not None:
                 coupon = calculate_managed_coupon(
@@ -114,12 +121,69 @@ async def create_order(
     total = discounted_subtotal + shipping_amount
     created_at = datetime.now(timezone.utc)
 
+    order_sequence = (await db.execute(
+        select(text("nextval('order_reference_seq')"))
+    )).scalar_one()
+    order_number = f"MAS-{order_sequence:05d}"
+
+    order_id = (await db.execute(
+        insert(orders_table).values(
+            order_number=order_number,
+            phone=normalized_phone,
+            email=payload.email.strip().casefold(),
+            status="placed",
+            total=total,
+            created_at=created_at,
+            customer_name=payload.customer_name.strip(),
+            payment_status="pending_offline",
+            subtotal=subtotal,
+            shipping_amount=shipping_amount,
+            discount_amount=discount,
+            coupon_code=coupon_code,
+            coupon_label=coupon_label,
+            delivery_mode=delivery_mode,
+            country_code=country_code,
+            shipping_note=shipping_note,
+            item_count=sum(item.qty for item in items),
+            address_line=payload.address_line.strip(),
+            city=payload.city.strip(),
+            state=payload.state.strip() if payload.state else None,
+            postal_code=payload.postal_code.strip(),
+        ).returning(orders_table.c.id)
+    )).scalar_one()
+
+    # Insert order items
+    for item in items:
+        await db.execute(insert(order_items_table).values(
+            order_id=order_id,
+            product_id=item.product_id,
+            variant_id=item.variant_id,
+            name=item.name,
+            pack_size=item.pack_size,
+            sku=item.sku,
+            dish_type=item.dish_type,
+            categories=list(item.categories),
+            price=item.unit_price,
+            qty=item.qty,
+            line_total=item.unit_price * item.qty,
+        ))
+
+    # Insert order history
+    await db.execute(insert(order_history_table).values(
+        order_id=order_id,
+        status="placed",
+        changed_at=created_at,
+        note="Order placed; awaiting admin confirmation.",
+    ))
+
+    await db.commit()
+
     order = {
-        "id": 0,
-        "order_number": "",
+        "id": order_id,
+        "order_number": order_number,
         "customer_name": payload.customer_name.strip(),
         "phone": normalized_phone,
-        "email": payload.email.strip().casefold() if payload.email else None,
+        "email": payload.email.strip().casefold(),
         "status": "placed",
         "payment_status": "pending_offline",
         "subtotal": float(subtotal),
@@ -154,7 +218,7 @@ async def create_order(
         "postal_code": payload.postal_code.strip(),
         "history": [
             {
-                "id": 1,
+                "id": str(uuid4()),
                 "status": "placed",
                 "changed_at": created_at.isoformat(),
                 "note": "Order placed; awaiting admin confirmation.",
@@ -162,40 +226,45 @@ async def create_order(
         ],
     }
 
-    order_id = (await db.execute(
-        insert(orders_table).values(
-            order_number=f"TMP-{uuid4().hex}",
-            phone=normalized_phone,
-            email=order["email"],
-            status="placed",
-            total=total,
-            created_at=created_at,
-            order_data={},
-        ).returning(orders_table.c.id)
-    )).scalar_one()
-    order_number = f"MAS-{order_id + 1000}"
-    order["id"] = order_id
-    order["order_number"] = order_number
-    await db.execute(update(orders_table).where(orders_table.c.id == order_id).values(
-        order_number=order_number,
-        order_data=order,
-    ))
-    await db.commit()
-
-    # FR-18 is intentionally deferred: no email/SMS/WhatsApp provider is called here.
+    order["email_confirmation_status"] = await send_order_confirmation_email(db, order)
     return order
 
 
 @router.get("/{id_or_order_number}", response_model=Order)
 async def get_order(id_or_order_number: str, phone: str, db: AsyncSession = Depends(get_db)) -> Order:
     normalized_reference = id_or_order_number.strip().upper()
-    statement = select(orders_table.c.order_data).where(
+    legacy_id_reference = (
+        normalized_reference[4:].lower()
+        if normalized_reference.startswith("MAS-")
+        else normalized_reference.lower()
+    )
+    statement = select(orders_table).where(
         (orders_table.c.order_number == normalized_reference)
-        | (orders_table.c.id.cast(String) == normalized_reference)
+        | (orders_table.c.id.cast(String) == normalized_reference.lower())
+        | (orders_table.c.id.cast(String) == legacy_id_reference)
     )
     result = await db.execute(statement)
-    order = result.scalar_one_or_none()
+    row = result.mappings().first()
 
-    if order is None or not phone_numbers_match(phone, str(order.get("phone") or "")):
+    if row is None:
+        raise HTTPException(status_code=404, detail="Order not found")
+
+    order = dict(row)
+
+    # Load order items
+    items_result = await db.execute(
+        select(order_items_table).where(order_items_table.c.order_id == order["id"])
+    )
+    order["items"] = [dict(item) for item in items_result.mappings()]
+
+    # Load order history
+    history_result = await db.execute(
+        select(order_history_table)
+        .where(order_history_table.c.order_id == order["id"])
+        .order_by(order_history_table.c.changed_at)
+    )
+    order["history"] = [dict(event) for event in history_result.mappings()]
+
+    if not phone_numbers_match(phone, str(order.get("phone") or "")):
         raise HTTPException(status_code=404, detail="Order not found")
     return Order.model_validate(order)

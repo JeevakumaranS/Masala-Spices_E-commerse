@@ -25,7 +25,7 @@ export function ProductPurchasePanel({ product }: Props) {
   const add = useCartStore((s) => s.add);
   const showToast = useUIStore((s) => s.showToast);
 
-  const [variantId, setVariantId] = useState<number | null>(product.variants[0]?.id ?? null);
+  const [variantId, setVariantId] = useState<string | null>(product.variants[0]?.id ?? null);
   const [quantity, setQuantity] = useState(1);
 
   const selected =
@@ -39,7 +39,7 @@ export function ProductPurchasePanel({ product }: Props) {
   const maxQty = Math.max(1, Math.min(stock || 20, 20));
   const perMeal = product.meal_cost ?? (product.categories.some((category) => category.includes("kit") || category.includes("combo")) ? Math.ceil(price / 4) : null);
 
-  const selectVariant = (id: number) => {
+  const selectVariant = (id: string) => {
     setVariantId(id);
     setQuantity(1);
   };

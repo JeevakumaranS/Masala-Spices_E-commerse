@@ -13,7 +13,7 @@ router = APIRouter(prefix="/api/blog", tags=["blog"])
 def list_blog_posts() -> list[dict[str, Any]]:
     return [
         {
-            "id": post["id"],
+            "id": post.get("id"),
             "title": post["title"],
             "slug": post["slug"],
             "category": post["category"],

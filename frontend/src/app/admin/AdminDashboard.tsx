@@ -9,18 +9,23 @@ import {
   AdminOrder,
   AdminProduct,
   AdminReview,
+  AdminIntegrationSettings,
   AdminRegistrationStatus,
   AnalyticsReport,
   getAdminRegistrationStatus,
   adminLogin,
   adminRequest,
   asItems,
+  revealAdminIntegrationApiKey,
+  revealAdminTwilioCredentials,
   registerAdmin,
 } from "@/lib/admin";
 import {
   ArrowRightIcon,
   BagIcon,
   CheckCircleIcon,
+  EyeIcon,
+  EyeOffIcon,
   FlameIcon,
   HomeIcon,
   PackageIcon,
@@ -36,7 +41,8 @@ import {
 } from "@/components/ui/icons";
 import { formatINR, formatShortINR } from "@/lib/format";
 
-type Section = "overview" | "orders" | "products" | "categories" | "coupons" | "reviews" | "analytics";
+type Section = "overview" | "orders" | "products" | "categories" | "coupons" | "reviews" | "analytics" | "api";
+type OrderFilter = "all" | "placed" | "processing" | "shipped";
 type VariantDraft = {
   pack_size: string;
   price: string;
@@ -47,7 +53,7 @@ type VariantDraft = {
   expiry_date: string;
 };
 type ProductDraft = {
-  id?: number;
+  id?: string;
   name: string;
   slug: string;
   description: string;
@@ -83,9 +89,21 @@ const NAV: { id: Section; label: string; Icon: typeof HomeIcon }[] = [
   { id: "coupons", label: "Promotions", Icon: FlameIcon },
   { id: "reviews", label: "Reviews", Icon: StarIcon },
   { id: "analytics", label: "Analytics", Icon: UtensilsIcon },
+  { id: "api", label: "API & notifications", Icon: ShieldIcon },
 ];
 
-const ORDER_STAGES = ["placed", "under_review", "confirmed", "shipped"];
+const ORDER_STAGES: AdminOrder["status"][] = ["placed", "processing", "shipped", "delivered"];
+const ORDER_FILTERS: { id: OrderFilter; label: string }[] = [
+  { id: "all", label: "All orders" },
+  { id: "placed", label: "New orders" },
+  { id: "processing", label: "Processing" },
+  { id: "shipped", label: "Shipped" },
+];
+const NEXT_ORDER_STAGE: Partial<Record<AdminOrder["status"], AdminOrder["status"]>> = {
+  placed: "processing",
+  processing: "shipped",
+  shipped: "delivered",
+};
 const EMPTY_ANALYTICS: AnalyticsReport = {
   total_revenue: 0,
   orders_count: 0,
@@ -195,12 +213,26 @@ function Modal({
 export default function AdminDashboard() {
   const token = useSyncExternalStore(subscribeAdminSession, getAdminSession, () => "");
   const [section, setSection] = useState<Section>("overview");
+  const [orderFilter, setOrderFilter] = useState<OrderFilter>("all");
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [coupons, setCoupons] = useState<AdminCoupon[]>([]);
   const [reviews, setReviews] = useState<AdminReview[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsReport>(EMPTY_ANALYTICS);
+  const [integrationSettings, setIntegrationSettings] = useState<AdminIntegrationSettings | null>(null);
+  const [smsApiKey, setSmsApiKey] = useState("");
+  const [smsAccountSid, setSmsAccountSid] = useState("");
+  const [smsSenderPhone, setSmsSenderPhone] = useState("");
+  const [emailApiKey, setEmailApiKey] = useState("");
+  const [smsApiKeyVisible, setSmsApiKeyVisible] = useState(false);
+  const [emailApiKeyVisible, setEmailApiKeyVisible] = useState(false);
+  const [smsApiKeyDirty, setSmsApiKeyDirty] = useState(false);
+  const [smsAccountSidDirty, setSmsAccountSidDirty] = useState(false);
+  const [emailApiKeyDirty, setEmailApiKeyDirty] = useState(false);
+  const [clearSmsApiKey, setClearSmsApiKey] = useState(false);
+  const [clearEmailApiKey, setClearEmailApiKey] = useState(false);
+  const [integrationSettingsError, setIntegrationSettingsError] = useState("");
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -210,7 +242,6 @@ export default function AdminDashboard() {
   const [loginError, setLoginError] = useState("");
   const [registrationStatus, setRegistrationStatus] = useState<AdminRegistrationStatus | null>(null);
   const [registrationStatusError, setRegistrationStatusError] = useState("");
-  const [bootstrapSecret, setBootstrapSecret] = useState("");
   const [setupEmail, setSetupEmail] = useState("");
   const [setupPassword, setSetupPassword] = useState("");
   const [setupError, setSetupError] = useState("");
@@ -283,6 +314,52 @@ export default function AdminDashboard() {
     return () => window.clearTimeout(timer);
   }, [token, refresh]);
 
+  useEffect(() => {
+    if (!token || section !== "api") return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const settings = await adminRequest<AdminIntegrationSettings>(
+          "/api/admin/integration-settings",
+          token,
+        );
+        const [savedSmsCredentials, savedEmailApiKey] = await Promise.all([
+          settings.sms_api_key_configured
+            ? revealAdminTwilioCredentials(token)
+            : Promise.resolve({
+                account_sid: "",
+                auth_token: "",
+                sender_phone: settings.sms_sender_phone,
+              }),
+          settings.email_api_key_configured
+            ? revealAdminIntegrationApiKey("email", token)
+            : Promise.resolve(""),
+        ]);
+        if (cancelled) return;
+        setIntegrationSettings(settings);
+        setIntegrationSettingsError("");
+        setSmsApiKey(savedSmsCredentials.auth_token);
+        setSmsAccountSid(savedSmsCredentials.account_sid);
+        setSmsSenderPhone(savedSmsCredentials.sender_phone);
+        setEmailApiKey(savedEmailApiKey);
+        setSmsApiKeyVisible(false);
+        setEmailApiKeyVisible(false);
+        setSmsApiKeyDirty(false);
+        setSmsAccountSidDirty(false);
+        setEmailApiKeyDirty(false);
+        setClearSmsApiKey(false);
+        setClearEmailApiKey(false);
+      } catch (error: unknown) {
+        if (!cancelled) {
+          setIntegrationSettingsError(error instanceof Error ? error.message : "Integration settings could not be loaded.");
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [token, section]);
+
   const runAction = async (action: () => Promise<unknown>, successMessage: string) => {
     setBusy(true);
     setNotice("");
@@ -315,6 +392,69 @@ export default function AdminDashboard() {
     }
   };
 
+  const saveIntegrationSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setBusy(true);
+    setIntegrationSettingsError("");
+    setNotice("");
+    try {
+      const payload: {
+        sms_enabled: boolean;
+        email_enabled: boolean;
+        sms_api_key?: string;
+        sms_account_sid?: string;
+        sms_sender_phone: string;
+        email_api_key?: string;
+        email_sender_name: string;
+        email_sender_email: string;
+        clear_sms_api_key: boolean;
+        clear_email_api_key: boolean;
+      } = {
+        sms_enabled: integrationSettings?.sms_enabled ?? false,
+        email_enabled: integrationSettings?.email_enabled ?? false,
+        sms_sender_phone: smsSenderPhone,
+        email_sender_name: integrationSettings?.email_sender_name ?? "",
+        email_sender_email: integrationSettings?.email_sender_email ?? "",
+        clear_sms_api_key: clearSmsApiKey,
+        clear_email_api_key: clearEmailApiKey,
+      };
+      if (smsApiKeyDirty && smsApiKey.trim()) payload.sms_api_key = smsApiKey.trim();
+      if (smsAccountSidDirty && smsAccountSid.trim()) payload.sms_account_sid = smsAccountSid.trim();
+      if (emailApiKeyDirty && emailApiKey.trim()) payload.email_api_key = emailApiKey.trim();
+      const updated = await adminRequest<AdminIntegrationSettings>(
+        "/api/admin/integration-settings",
+        token,
+        { method: "PUT", body: JSON.stringify(payload) },
+      );
+      setIntegrationSettings(updated);
+      if (!updated.sms_api_key_configured) setSmsApiKey("");
+      if (!updated.sms_api_key_configured) setSmsAccountSid("");
+      setSmsSenderPhone(updated.sms_sender_phone);
+      if (!updated.email_api_key_configured) setEmailApiKey("");
+      setSmsApiKeyVisible(false);
+      setEmailApiKeyVisible(false);
+      setSmsApiKeyDirty(false);
+      setSmsAccountSidDirty(false);
+      setEmailApiKeyDirty(false);
+      setClearSmsApiKey(false);
+      setClearEmailApiKey(false);
+      setNotice("API settings saved.");
+    } catch (error) {
+      setIntegrationSettingsError(error instanceof Error ? error.message : "API settings could not be saved.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const toggleIntegrationApiKeyVisibility = (channel: "sms" | "email") => {
+    const isVisible = channel === "sms" ? smsApiKeyVisible : emailApiKeyVisible;
+    if (channel === "sms") {
+      setSmsApiKeyVisible(!isVisible);
+    } else {
+      setEmailApiKeyVisible(!isVisible);
+    }
+  };
+
   const signOut = () => {
     window.sessionStorage.removeItem("masala-admin-token");
     window.dispatchEvent(new Event("masala-admin-session"));
@@ -331,17 +471,14 @@ export default function AdminDashboard() {
     setBusy(true);
     setSetupError("");
     try {
-      const created = await registerAdmin(setupEmail.trim(), setupPassword, {
-        bootstrapSecret,
-      });
+      const created = await registerAdmin(setupEmail.trim(), setupPassword);
       if (!created.access_token) {
         throw new Error("The initial admin was registered, but the server did not return a session. Sign in to continue.");
       }
       window.sessionStorage.setItem("masala-admin-token", created.access_token);
       window.dispatchEvent(new Event("masala-admin-session"));
-      setBootstrapSecret("");
       setSetupPassword("");
-      setRegistrationStatus({ admins_exist: true, bootstrap_enabled: false });
+      setRegistrationStatus({ admins_exist: true });
     } catch (error) {
       setSetupError(error instanceof Error ? error.message : "Admin account could not be registered.");
     } finally {
@@ -389,7 +526,7 @@ export default function AdminDashboard() {
   }, [products, search]);
 
   if (!token) {
-    const firstAdminSetup = !registrationStatus?.admins_exist && registrationStatus?.bootstrap_enabled;
+    const firstAdminSetup = registrationStatus !== null && !registrationStatus.admins_exist;
     return (
       <div className="grid min-h-[80vh] place-items-center bg-[radial-gradient(circle_at_top_right,#fbe8bf,transparent_45%),linear-gradient(140deg,#fff8ee,#f3e9dc)] px-4 py-12">
         <div className="w-full max-w-md rounded-3xl border border-paper-200 bg-white p-7 shadow-xl sm:p-9">
@@ -402,7 +539,7 @@ export default function AdminDashboard() {
           </h1>
           <p className="mt-2 text-sm leading-relaxed text-ink-500">
             {firstAdminSetup
-              ? "Create the first administrator account using the one-time bootstrap secret configured on the backend."
+              ? "Create the first administrator account with an email address and password."
               : "Sign in with an administrator account to manage orders, products and promotions."}
           </p>
           {firstAdminSetup ? (
@@ -414,10 +551,6 @@ export default function AdminDashboard() {
               <label className={labelClass} htmlFor="setup-password">
                 Password
                 <input id="setup-password" type="password" autoComplete="new-password" minLength={12} maxLength={128} required className={fieldClass} value={setupPassword} onChange={(event) => setSetupPassword(event.target.value)} />
-              </label>
-              <label className={labelClass} htmlFor="bootstrap-secret">
-                One-time bootstrap secret
-                <input id="bootstrap-secret" type="password" autoComplete="off" required className={fieldClass} value={bootstrapSecret} onChange={(event) => setBootstrapSecret(event.target.value)} />
               </label>
               {setupError ? <p role="alert" className="text-sm font-medium text-chili-700">{setupError}</p> : null}
               <button className={`${primaryButton} w-full`} disabled={busy}>
@@ -459,11 +592,6 @@ export default function AdminDashboard() {
           </form>
           )}
           {registrationStatusError ? <p role="alert" className="mt-4 text-center text-xs text-chili-700">{registrationStatusError}</p> : null}
-          {registrationStatus && !registrationStatus.admins_exist && !registrationStatus.bootstrap_enabled ? (
-            <p role="alert" className="mt-4 rounded-xl bg-saffron-50 p-3 text-sm text-ink-700">
-              No admin account exists yet. Configure `ADMIN_BOOTSTRAP_SECRET` on the backend to enable first-admin setup.
-            </p>
-          ) : null}
           <p className="mt-5 text-center text-xs text-ink-400">
             {firstAdminSetup ? "First-admin setup closes after the account is created." : "Admin access only · session ends when this browser tab closes"}
           </p>
@@ -530,12 +658,7 @@ export default function AdminDashboard() {
       spice_level: editor.spice_level,
       price: Number(editor.price),
       mrp: Number(editor.mrp),
-      images: editor.image_url.split(/\r?\n/).map((url) => url.trim()).filter(Boolean).map((url, sort_order) => ({
-        url,
-        alt_text: editor.name.trim(),
-        sort_order,
-        image_type: sort_order === 0 ? "pack_shot" : "gallery",
-      })),
+      images: editor.image_url.split(/\r?\n/).map((url) => url.trim()).filter(Boolean),
       variants: editor.variants.filter((variant) => variant.pack_size.trim()).map((variant) => ({
         pack_size: variant.pack_size.trim(),
         price: Number(variant.price),
@@ -627,35 +750,55 @@ export default function AdminDashboard() {
 
   const updateOrder = async () => {
     if (!activeOrder) return;
-    if (originalOrderStatus === "under_review" && activeOrder.status === "confirmed") {
-      if (!activeOrder.admin_note?.trim()) {
-        setNotice("Record the customer contact outcome before confirming this order.");
-        return;
-      }
-      if (activeOrder.payment_status === "pending_offline" && !activeOrder.payment_note?.trim()) {
-        setNotice("Record the offline payment arrangement before confirming this order.");
-        return;
-      }
+    const shippingTransition =
+      originalOrderStatus === "processing" && activeOrder.status === "shipped";
+    if (shippingTransition && !activeOrder.tracking_id?.trim()) {
+      setNotice("Enter the tracking ID before marking this order as shipped.");
+      return;
     }
-    const saved = await runAction(
-      () => adminRequest(`/api/admin/orders/${activeOrder.id}`, token, {
+    if (shippingTransition && !activeOrder.courier_partner?.trim()) {
+      setNotice("Enter the courier partner before marking this order as shipped.");
+      return;
+    }
+    setBusy(true);
+    setNotice("");
+    try {
+      const updated = await adminRequest<{ email_notification_status?: "sent" | "failed" | "disabled" | null }>(
+        `/api/admin/orders/${activeOrder.id}`,
+        token,
+        {
         method: "PUT",
         body: JSON.stringify({
           items: activeOrder.items.map((item) => ({ ...item, qty: Math.max(1, Number(item.qty)) })),
           status: activeOrder.status,
+          tracking_id: activeOrder.tracking_id ?? null,
+          courier_partner: activeOrder.courier_partner ?? null,
           admin_note: activeOrder.admin_note ?? "",
           payment_note: activeOrder.payment_note ?? "",
         }),
-      }),
-      "Order changes saved.",
-    );
-    if (saved) setActiveOrder(null);
+        },
+      );
+      const mailNotice = updated.email_notification_status === "failed"
+        ? " The status was saved, but the notification email failed to send."
+        : updated.email_notification_status === "disabled"
+          ? " The status was saved; email notifications are disabled."
+          : updated.email_notification_status === "sent"
+            ? " A status update email was sent to the customer."
+            : "";
+      setNotice(`Order changes saved.${mailNotice}`);
+      setActiveOrder(null);
+      await refresh();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Order changes could not be saved.");
+    } finally {
+      setBusy(false);
+    }
   };
 
   const moderateReview = async (review: AdminReview, status: AdminReview["status"]) => {
     await runAction(
       () => adminRequest(`/api/admin/reviews/${review.id}`, token, {
-        method: "PATCH",
+        method: "PUT",
         body: JSON.stringify({ status }),
       }),
       `Review ${status}.`,
@@ -717,11 +860,6 @@ export default function AdminDashboard() {
             >
               <Icon className="size-[1.05rem]" />
               {label}
-              {id === "orders" && orders.filter((order) => order.status === "placed" || order.status === "under_review").length > 0 ? (
-                <span className="ml-auto grid min-w-5 place-items-center rounded-full bg-chili-500 px-1.5 py-0.5 text-[0.65rem] font-bold text-white">
-                  {orders.filter((order) => order.status === "placed" || order.status === "under_review").length}
-                </span>
-              ) : null}
             </button>
           ))}
         </nav>
@@ -784,15 +922,49 @@ export default function AdminDashboard() {
           <section className="mt-7">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="font-display text-xl font-semibold text-ink-950">Order review queue</h2>
-                <p className="text-sm text-ink-500">Review each order and contact customers directly before confirming.</p>
+                <h2 className="font-display text-xl font-semibold text-ink-950">Orders</h2>
+                <p className="text-sm text-ink-500">Filter orders by their current status and review their details.</p>
               </div>
               <label className="relative block w-full sm:max-w-xs">
                 <SearchIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400" />
                 <input className={`${fieldClass} mt-0 pl-9`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search order or customer" aria-label="Search orders" />
               </label>
             </div>
-            <OrdersTable orders={orders.filter((order) => `${order.order_number} ${order.customer_name} ${order.phone} ${order.status}`.toLowerCase().includes(search.toLowerCase()))} onSelect={openOrder} />
+            <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter orders by status">
+              {ORDER_FILTERS.map(({ id, label }) => {
+                const count = id === "all"
+                  ? orders.length
+                  : orders.filter((order) => order.status === id).length;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    onClick={() => setOrderFilter(id)}
+                    aria-pressed={orderFilter === id}
+                    className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
+                      orderFilter === id
+                        ? "border-masala-700 bg-masala-700 text-white"
+                        : "border-paper-200 bg-white text-ink-700 hover:border-masala-300 hover:text-masala-800"
+                    }`}
+                  >
+                    {label}
+                    <span className={`rounded-full px-2 py-0.5 text-xs ${
+                      orderFilter === id ? "bg-white/15 text-white" : "bg-paper-100 text-ink-500"
+                    }`}>{count}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <OrdersTable
+              orders={orders.filter((order) => {
+                const matchesFilter = orderFilter === "all" || order.status === orderFilter;
+                const matchesSearch = `${order.order_number} ${order.customer_name} ${order.phone} ${order.status}`
+                  .toLowerCase()
+                  .includes(search.toLowerCase());
+                return matchesFilter && matchesSearch;
+              })}
+              onSelect={openOrder}
+            />
           </section>
         ) : null}
 
@@ -906,6 +1078,194 @@ export default function AdminDashboard() {
         ) : null}
 
         {section === "analytics" ? <Analytics analytics={analytics} /> : null}
+        {section === "api" ? (
+          <form onSubmit={saveIntegrationSettings} className="mt-7 max-w-4xl space-y-5">
+            <div className="rounded-2xl border border-saffron-200 bg-saffron-50 p-4 text-sm leading-relaxed text-ink-700">
+              Saved provider credentials remain in their fields as masked dots after refresh. Use the eye button to reveal or hide a secret. Keep your screen private while it is visible.
+              Order confirmation emails use Brevo transactional email. Add a Brevo API v3 key and a verified sender identity before enabling email.
+            </div>
+            {integrationSettingsError ? (
+              <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 px-4 py-3 text-sm text-chili-700">{integrationSettingsError}</p>
+            ) : null}
+            {!integrationSettings && !integrationSettingsError ? (
+              <p role="status" className="text-sm text-ink-500">Loading integration settings…</p>
+            ) : null}
+            {integrationSettings ? (
+              <>
+                <section className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="font-display text-xl font-semibold text-ink-950">SMS</h2>
+                      <p className="mt-1 text-sm text-ink-500">Send order confirmations through Twilio Programmable Messaging.</p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm font-semibold text-ink-700">
+                      <input
+                        type="checkbox"
+                        checked={integrationSettings.sms_enabled}
+                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, sms_enabled: event.target.checked })}
+                        className="size-4 accent-[#bd4b16]"
+                      />
+                      Enabled
+                    </label>
+                  </div>
+                  <div className="mt-5">
+                    <label className={labelClass} htmlFor="twilio-account-sid">Twilio Account SID</label>
+                    <input
+                      id="twilio-account-sid"
+                      type="text"
+                      autoComplete="off"
+                      className={fieldClass}
+                      placeholder="AC followed by 32 characters"
+                      value={smsAccountSid}
+                      onChange={(event) => {
+                        setSmsAccountSid(event.target.value);
+                        setSmsAccountSidDirty(true);
+                        setClearSmsApiKey(false);
+                      }}
+                    />
+                  </div>
+                  <div className="mt-4">
+                    <label className={labelClass} htmlFor="sms-api-key">Twilio Auth Token</label>
+                    <div className="mt-1.5 flex gap-2">
+                      <input
+                        id="sms-api-key"
+                        type={smsApiKeyVisible ? "text" : "password"}
+                        autoComplete="new-password"
+                        className={`${fieldClass} mt-0 min-w-0 flex-1`}
+                        placeholder={integrationSettings.sms_api_key_configured ? "" : "Enter Twilio Auth Token"}
+                        value={smsApiKey}
+                        onChange={(event) => {
+                          setSmsApiKey(event.target.value);
+                          setSmsApiKeyDirty(true);
+                          setClearSmsApiKey(false);
+                        }}
+                      />
+                      {integrationSettings.sms_api_key_configured ? (
+                        <button
+                          type="button"
+                          className={secondaryButton}
+                          onClick={() => toggleIntegrationApiKeyVisibility("sms")}
+                          aria-label={smsApiKeyVisible ? "Hide Twilio Auth Token" : "Show Twilio Auth Token"}
+                          title={smsApiKeyVisible ? "Hide Auth Token" : "Show Auth Token"}
+                        >
+                          {smsApiKeyVisible ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <label className={`${labelClass} mt-4 block`}>
+                    Twilio sender phone number (E.164)
+                    <input
+                      type="tel"
+                      autoComplete="off"
+                      className={fieldClass}
+                      placeholder="+14155550123"
+                      value={smsSenderPhone}
+                      onChange={(event) => {
+                        setSmsSenderPhone(event.target.value);
+                        setClearSmsApiKey(false);
+                      }}
+                    />
+                  </label>
+                  <p className="mt-2 text-xs leading-relaxed text-ink-500">
+                    Use a Twilio number enabled for SMS on your account. Confirm Twilio supports messaging to your customers&apos; destinations.
+                  </p>
+                  {integrationSettings.sms_api_key_configured ? (
+                    <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-chili-700">
+                      <input type="checkbox" checked={clearSmsApiKey} onChange={(event) => setClearSmsApiKey(event.target.checked)} className="size-4 accent-[#bd4b16]" />
+                      Remove saved Twilio credentials
+                    </label>
+                  ) : null}
+                </section>
+                <section className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div>
+                      <h2 className="font-display text-xl font-semibold text-ink-950">Email</h2>
+                      <p className="mt-1 text-sm text-ink-500">Send order confirmations through the Brevo transactional email API.</p>
+                    </div>
+                    <label className="inline-flex items-center gap-2 text-sm font-semibold text-ink-700">
+                      <input
+                        type="checkbox"
+                        checked={integrationSettings.email_enabled}
+                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, email_enabled: event.target.checked })}
+                        className="size-4 accent-[#bd4b16]"
+                      />
+                      Enabled
+                    </label>
+                  </div>
+                  <div className="mt-5">
+                    <label className={labelClass} htmlFor="email-api-key">Brevo API v3 key</label>
+                    <div className="mt-1.5 flex gap-2">
+                      <input
+                        id="email-api-key"
+                        type={emailApiKeyVisible ? "text" : "password"}
+                        autoComplete="new-password"
+                        className={`${fieldClass} mt-0 min-w-0 flex-1`}
+                        placeholder={integrationSettings.email_api_key_configured ? "" : "Enter API key"}
+                        value={emailApiKey}
+                        onChange={(event) => {
+                          setEmailApiKey(event.target.value);
+                          setEmailApiKeyDirty(true);
+                          setClearEmailApiKey(false);
+                        }}
+                      />
+                      {integrationSettings.email_api_key_configured ? (
+                        <button
+                          type="button"
+                          className={secondaryButton}
+                          onClick={() => toggleIntegrationApiKeyVisibility("email")}
+                          aria-label={emailApiKeyVisible ? "Hide email API key" : "Show email API key"}
+                          title={emailApiKeyVisible ? "Hide API key" : "Show API key"}
+                        >
+                          {emailApiKeyVisible ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
+                    <label className={labelClass}>
+                      Verified sender name
+                      <input
+                        type="text"
+                        autoComplete="organization"
+                        maxLength={120}
+                        required={integrationSettings.email_enabled}
+                        className={fieldClass}
+                        placeholder="Masala House"
+                        value={integrationSettings.email_sender_name ?? ""}
+                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, email_sender_name: event.target.value })}
+                      />
+                    </label>
+                    <label className={labelClass}>
+                      Verified sender email
+                      <input
+                        type="email"
+                        autoComplete="email"
+                        maxLength={254}
+                        required={integrationSettings.email_enabled}
+                        className={fieldClass}
+                        placeholder="orders@example.com"
+                        value={integrationSettings.email_sender_email ?? ""}
+                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, email_sender_email: event.target.value })}
+                      />
+                    </label>
+                  </div>
+                  {integrationSettings.email_api_key_configured ? (
+                    <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-chili-700">
+                      <input type="checkbox" checked={clearEmailApiKey} onChange={(event) => setClearEmailApiKey(event.target.checked)} className="size-4 accent-[#bd4b16]" />
+                      Remove saved email API key
+                    </label>
+                  ) : null}
+                </section>
+                <div className="flex justify-end">
+                  <button type="submit" className={primaryButton} disabled={busy}>
+                    {busy ? "Saving…" : "Save API settings"}
+                  </button>
+                </div>
+              </>
+            ) : null}
+          </form>
+        ) : null}
       </div>
 
       {productEditor ? (
@@ -1030,7 +1390,7 @@ export default function AdminDashboard() {
                           {products.filter((product) => product.status === "active").map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
                         </select>
                         <button type="button" className={secondaryButton} disabled={!productToAdd} onClick={() => {
-                          const product = products.find((candidate) => candidate.id === Number(productToAdd));
+                          const product = products.find((candidate) => candidate.id === productToAdd);
                           if (!product) return;
                           const variant = product.variants[0];
                           setActiveOrder({
@@ -1059,11 +1419,36 @@ export default function AdminDashboard() {
               </div>
             </div>
             <div className="space-y-4">
-              <label className={labelClass}>Order status<select className={fieldClass} value={activeOrder.status} onChange={(event) => setActiveOrder({ ...activeOrder, status: event.target.value })}>{ORDER_STAGES.map((status) => <option key={status} value={status}>{displayStatus(status)}</option>)}</select></label>
-              <label className={labelClass}>Customer contact / review note{originalOrderStatus === "under_review" && activeOrder.status === "confirmed" ? <span className="ml-1 text-chili-700">(required to confirm)</span> : null}<textarea rows={3} aria-required={originalOrderStatus === "under_review" && activeOrder.status === "confirmed"} className={fieldClass} placeholder="Record contact attempt or order adjustment context…" value={activeOrder.admin_note ?? ""} onChange={(event) => setActiveOrder({ ...activeOrder, admin_note: event.target.value })} /></label>
-              <label className={labelClass}>Offline payment arrangement{originalOrderStatus === "under_review" && activeOrder.status === "confirmed" && activeOrder.payment_status === "pending_offline" ? <span className="ml-1 text-chili-700">(required to confirm)</span> : null}<textarea rows={3} aria-required={originalOrderStatus === "under_review" && activeOrder.status === "confirmed" && activeOrder.payment_status === "pending_offline"} className={fieldClass} placeholder="Cash on delivery, bank transfer, UPI reference…" value={activeOrder.payment_note ?? ""} onChange={(event) => setActiveOrder({ ...activeOrder, payment_note: event.target.value })} /></label>
+              <label className={labelClass}>Order status<select className={fieldClass} value={activeOrder.status} onChange={(event) => setActiveOrder({ ...activeOrder, status: event.target.value as AdminOrder["status"] })}>{[activeOrder.status, NEXT_ORDER_STAGE[activeOrder.status]].filter((status): status is AdminOrder["status"] => Boolean(status)).map((status) => <option key={status} value={status}>{displayStatus(status)}</option>)}</select></label>
+              {activeOrder.status === "shipped" ? (
+                <>
+                  <label className={labelClass}>
+                    Courier partner{originalOrderStatus === "processing" ? <span className="ml-1 text-chili-700">(required)</span> : null}
+                    <input
+                      className={fieldClass}
+                      maxLength={120}
+                      required={originalOrderStatus === "processing"}
+                      value={activeOrder.courier_partner ?? ""}
+                      onChange={(event) => setActiveOrder({ ...activeOrder, courier_partner: event.target.value })}
+                      placeholder="e.g. India Post, Blue Dart"
+                    />
+                  </label>
+                  <label className={labelClass}>
+                    Tracking ID{originalOrderStatus === "processing" ? <span className="ml-1 text-chili-700">(required)</span> : null}
+                    <input
+                      className={fieldClass}
+                      maxLength={128}
+                      required={originalOrderStatus === "processing"}
+                      value={activeOrder.tracking_id ?? ""}
+                      onChange={(event) => setActiveOrder({ ...activeOrder, tracking_id: event.target.value })}
+                      placeholder="Shipment tracking number"
+                    />
+                  </label>
+                </>
+              ) : null}
+              <label className={labelClass}>Admin note<textarea rows={3} className={fieldClass} placeholder="Internal order note…" value={activeOrder.admin_note ?? ""} onChange={(event) => setActiveOrder({ ...activeOrder, admin_note: event.target.value })} /></label>
               <p className="rounded-xl border border-saffron-200 bg-saffron-50 p-3 text-xs leading-relaxed text-ink-700">
-                Confirm only after contacting the customer directly. Use the payment note to record any offline arrangement.
+                The customer receives an email when the order enters each stage. Courier and tracking details are included when it ships.
               </p>
               <button type="button" className={`${primaryButton} w-full`} disabled={busy} onClick={() => void updateOrder()}>{busy ? "Saving…" : "Save order review"}</button>
             </div>
@@ -1124,7 +1509,7 @@ function Overview({
   onOpenOrders: () => void;
   onSelectOrder: (order: AdminOrder) => void;
 }) {
-  const pending = orders.filter((order) => order.status === "placed" || order.status === "under_review");
+  const pending = orders.filter((order) => order.status === "placed" || order.status === "processing");
   const lowStock = products.flatMap((product) => product.variants).filter((variant) => variant.stock_qty <= 5).length;
   const kpis = [
     { label: "Gross sales", value: formatShortINR(analytics.total_revenue), note: "From recorded orders", Icon: TagIcon },

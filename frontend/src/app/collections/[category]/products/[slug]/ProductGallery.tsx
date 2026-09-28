@@ -33,7 +33,6 @@ export function ProductGallery({ product }: Props) {
             src={active?.url}
             alt={alt}
             aspect="aspect-[4/5]"
-            priority
             sizes="(max-width: 1024px) 100vw, 48vw"
             wrapperClassName="rounded-[1.5rem]"
           />

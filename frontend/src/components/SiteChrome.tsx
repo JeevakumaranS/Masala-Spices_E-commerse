@@ -5,6 +5,7 @@ import { Header } from "@/components/Header";
 import { Footer } from "@/components/Footer";
 import { SearchOverlay } from "@/components/SearchOverlay";
 import { CartDrawer } from "@/components/CartDrawer";
+import { SupportBubble } from "@/components/SupportBubble";
 
 export function SiteChrome() {
   const pathname = usePathname();
@@ -16,6 +17,7 @@ export function SiteChrome() {
       <Header />
       <SearchOverlay />
       <CartDrawer />
+      <SupportBubble />
     </>
   );
 }

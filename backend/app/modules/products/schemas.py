@@ -2,12 +2,13 @@
 
 from datetime import datetime
 from typing import List
+from uuid import UUID
 
 from pydantic import BaseModel, Field
 
 
 class ProductImage(BaseModel):
-    id: int
+    id: str
     url: str
     alt_text: str
     sort_order: int = 0
@@ -15,7 +16,7 @@ class ProductImage(BaseModel):
 
 
 class ProductVariant(BaseModel):
-    id: int
+    id: UUID
     pack_size: str
     price: float
     mrp: float
@@ -25,7 +26,7 @@ class ProductVariant(BaseModel):
 
 
 class Product(BaseModel):
-    id: int
+    id: UUID
     name: str
     slug: str
     description: str
@@ -57,3 +58,19 @@ class ReviewSubmission(BaseModel):
     reviewer_name: str
     rating: int = Field(ge=1, le=5)
     comment: str
+
+
+class ProductReview(BaseModel):
+    id: UUID
+    product_id: UUID
+    reviewer_name: str
+    rating: int
+    comment: str
+    status: str
+    created_at: datetime
+
+
+class ReviewSubmissionResponse(BaseModel):
+    status: str
+    id: UUID
+    product_id: UUID

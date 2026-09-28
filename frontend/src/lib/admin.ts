@@ -1,14 +1,14 @@
 import type { Category, Product } from "@/lib/types";
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+import { apiClient, getApiErrorMessage } from "@/lib/http";
 
 export type AdminProduct = Product & {
   variants: (Product["variants"][number] & { batch_no?: string | null })[];
 };
 
 export type AdminOrderItem = {
-  product_id: number;
-  variant_id?: number | null;
+  product_id: string;
+  variant_id?: string | null;
   name: string;
   pack_size?: string;
   qty: number;
@@ -17,12 +17,14 @@ export type AdminOrderItem = {
 };
 
 export type AdminOrder = {
-  id: number;
+  id: string;
   order_number: string;
   customer_name: string;
   phone: string;
   email?: string | null;
-  status: string;
+  status: "placed" | "processing" | "shipped" | "delivered";
+  tracking_id?: string | null;
+  courier_partner?: string | null;
   payment_status?: string;
   subtotal: number;
   total: number;
@@ -38,7 +40,7 @@ export type AdminOrder = {
 };
 
 export type AdminCoupon = {
-  id?: number;
+  id?: string;
   code: string;
   kind: "percentage" | "fixed" | "buy_x_get_y" | "combo";
   label: string;
@@ -56,8 +58,8 @@ export type AdminCoupon = {
 };
 
 export type AdminReview = {
-  id: number;
-  product_id: number;
+  id: string;
+  product_id: string;
   product_name?: string;
   reviewer_name: string;
   rating: number;
@@ -84,23 +86,65 @@ export type ProductInput = Omit<AdminProduct, "id" | "variants"> & {
 
 export type AdminRegistrationStatus = {
   admins_exist: boolean;
-  bootstrap_enabled: boolean;
 };
 
 export type AdminAccount = {
-  id: number;
+  id: string;
   email: string;
   is_active: boolean;
   created_at: string;
 };
 
 export type AdminRegistrationResult = {
-  id: number;
+  id: string;
   email: string;
   role: "admin";
   access_token?: string;
   token_type?: string;
 };
+
+export type AdminIntegrationSettings = {
+  sms_enabled: boolean;
+  email_enabled: boolean;
+  sms_api_key_configured: boolean;
+  email_api_key_configured: boolean;
+  email_sender_name: string;
+  email_sender_email: string;
+  sms_sender_phone: string;
+};
+
+export type AdminTwilioCredentials = {
+  account_sid: string;
+  auth_token: string;
+  sender_phone: string;
+};
+
+export async function revealAdminTwilioCredentials(
+  token: string,
+): Promise<AdminTwilioCredentials> {
+  const result = await adminRequest<AdminTwilioCredentials>(
+    "/api/admin/integration-settings/reveal",
+    token,
+    { method: "POST", body: JSON.stringify({ channel: "sms" }) },
+  );
+  if (!result.account_sid || !result.auth_token || !result.sender_phone) {
+    throw new Error("The server did not return complete Twilio credentials.");
+  }
+  return result;
+}
+
+export async function revealAdminIntegrationApiKey(
+  channel: "sms" | "email",
+  token: string,
+): Promise<string> {
+  const result = await adminRequest<{ api_key: string }>(
+    "/api/admin/integration-settings/reveal",
+    token,
+    { method: "POST", body: JSON.stringify({ channel }) },
+  );
+  if (!result.api_key) throw new Error("The server did not return the saved API key.");
+  return result.api_key;
+}
 
 export async function adminRequest<T>(
   path: string,
@@ -113,89 +157,68 @@ export async function adminRequest<T>(
     headers.set("Content-Type", "application/json");
   }
 
-  const response = await fetch(`${API_BASE_URL}${path}`, {
-    ...init,
-    headers,
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    let message = `Request failed (${response.status})`;
-    try {
-      const error = (await response.json()) as { detail?: string; message?: string };
-      message = error.detail ?? error.message ?? message;
-    } catch {
-      // Keep the HTTP status message when the server did not return JSON.
-    }
-    throw new Error(message);
+  try {
+    const response = await apiClient.request<T>({
+      url: path,
+      method: init.method ?? "GET",
+      headers: Object.fromEntries(headers.entries()),
+      data: typeof init.body === "string" ? JSON.parse(init.body) : init.body,
+    });
+    return response.data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, "Admin request failed."));
   }
-
-  if (response.status === 204) return undefined as T;
-  return (await response.json()) as T;
 }
 
 export async function adminLogin(email: string, password: string): Promise<string> {
-  const response = await fetch(`${API_BASE_URL}/api/admin/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-    cache: "no-store",
-  });
-
-  if (!response.ok) {
-    let message = "Unable to sign in. Check your credentials and try again.";
-    try {
-      const error = (await response.json()) as { detail?: string };
-      message = error.detail ?? message;
-    } catch {
-      // Keep the sign-in message when the server did not return JSON.
-    }
-    throw new Error(message);
+  let result: { access_token?: string };
+  try {
+    const response = await apiClient.post<{ access_token?: string }>(
+      "/api/admin/login",
+      { email, password },
+    );
+    result = response.data;
+  } catch (error) {
+    throw new Error(
+      getApiErrorMessage(error, "Unable to sign in. Check your credentials and try again."),
+    );
   }
-
-  const result = (await response.json()) as { access_token?: string };
   if (!result.access_token) throw new Error("The server did not return an admin session.");
   return result.access_token;
 }
 
 export async function getAdminRegistrationStatus(): Promise<AdminRegistrationStatus> {
-  const response = await fetch(`${API_BASE_URL}/api/admin/registration-status`, {
-    cache: "no-store",
-  });
-  if (!response.ok) {
+  try {
+    const response = await apiClient.get<AdminRegistrationStatus>(
+      "/api/admin/registration-status",
+    );
+    return response.data;
+  } catch {
     throw new Error("Admin setup status is unavailable. Check the backend connection.");
   }
-  return (await response.json()) as AdminRegistrationStatus;
 }
 
 export async function registerAdmin(
   email: string,
   password: string,
-  options: { token?: string; bootstrapSecret?: string } = {},
+  options: { token?: string } = {},
 ): Promise<AdminRegistrationResult> {
-  const headers = new Headers({ "Content-Type": "application/json" });
-  if (options.token) headers.set("Authorization", `Bearer ${options.token}`);
-  const response = await fetch(`${API_BASE_URL}/api/admin/register`, {
-    method: "POST",
-    headers,
-    body: JSON.stringify({
-      email,
-      password,
-      ...(options.bootstrapSecret ? { bootstrap_secret: options.bootstrapSecret } : {}),
-    }),
-    cache: "no-store",
-  });
-  if (!response.ok) {
-    let message = `Admin account could not be registered (${response.status}).`;
-    try {
-      const error = (await response.json()) as { detail?: string };
-      message = error.detail ?? message;
-    } catch {
-      // Keep the response status message when the server did not return JSON.
-    }
-    throw new Error(message);
+  try {
+    const response = await apiClient.post<AdminRegistrationResult>(
+      "/api/admin/register",
+      { email, password },
+      {
+        headers: options.token
+          ? { Authorization: `Bearer ${options.token}` }
+          : undefined,
+      },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(
+      getApiErrorMessage(error, "Admin account could not be registered."),
+    );
   }
-  return (await response.json()) as AdminRegistrationResult;
 }
 
 export function asItems<T>(payload: T[] | { items?: T[] }): T[] {

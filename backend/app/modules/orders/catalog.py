@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Iterable
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -19,8 +20,8 @@ class CatalogValidationError(ValueError):
 
 @dataclass(frozen=True)
 class QuotedOrderItem:
-    product_id: int
-    variant_id: int | None
+    product_id: UUID
+    variant_id: UUID | None
     name: str
     pack_size: str
     dish_type: str | None
@@ -49,14 +50,14 @@ async def quote_order_items(
         raise CatalogValidationError("One or more products in your bag are no longer available.")
 
     variant_ids = sorted({item.variant_id for item in items if item.variant_id is not None})
-    variants: dict[int, dict] = {}
+    variants: dict[UUID, dict] = {}
     if variant_ids:
         variant_result = await db.execute(
             select(variants_table).where(variants_table.c.id.in_(variant_ids))
         )
         variants = {row["id"]: dict(row) for row in variant_result.mappings()}
 
-    requested_by_variant: dict[int, int] = {}
+    requested_by_variant: dict[UUID, int] = {}
     for item in items:
         if item.variant_id is not None:
             requested_by_variant[item.variant_id] = (
@@ -83,7 +84,7 @@ async def quote_order_items(
         variant = variants.get(item.variant_id) if item.variant_id is not None else None
         if item.variant_id is not None and variant is None:
             raise CatalogValidationError("A selected pack size is no longer available.")
-        if variant is not None and int(variant["product_id"]) != item.product_id:
+        if variant is not None and variant["product_id"] != item.product_id:
             raise CatalogValidationError("A selected pack size does not match its product.")
 
         unit_price = Decimal(str(variant["price"] if variant else product["price"]))

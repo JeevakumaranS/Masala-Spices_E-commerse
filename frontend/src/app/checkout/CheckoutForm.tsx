@@ -1,5 +1,6 @@
 "use client";
 
+import axios from "axios";
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useForm, useWatch } from "react-hook-form";
@@ -15,6 +16,7 @@ import {
   type DeliveryMode,
 } from "@/lib/shipping";
 import { calculatePromo, validatePromoCode } from "@/lib/promos";
+import { apiClient, getApiErrorMessage } from "@/lib/http";
 import {
   FREE_SHIPPING_THRESHOLD,
   selectShipping,
@@ -35,8 +37,6 @@ import {
   TruckIcon,
   UserIcon,
 } from "@/components/ui/icons";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 /** "+91 98765 43210" / "09876543210" / "9876543210" → bare 10-digit mobile. */
 function normalizeIndianPhone(raw: string): string {
@@ -65,9 +65,10 @@ const checkoutSchema = z
     email: z
       .string()
       .trim()
+      .min(1, "Email is required for your order confirmation.")
       .refine(
-        (value) => value === "" || EMAIL_RE.test(value),
-        "That email doesn’t look right — leave it blank if you don’t have one.",
+        (value) => EMAIL_RE.test(value),
+        "Enter a valid email address.",
       ),
     address_line: z
       .string()
@@ -127,6 +128,8 @@ type CheckoutValues = z.infer<typeof checkoutSchema>;
 
 type OrderResponse = {
   order_number?: string;
+  email_confirmation_status?: "sent" | "failed" | "disabled";
+  sms_confirmation_status?: "sent" | "failed" | "disabled";
   subtotal?: number;
   shipping_amount?: number;
   discount_amount?: number;
@@ -137,10 +140,35 @@ type OrderResponse = {
   payment_status?: string;
 };
 
+type ApiValidationError = {
+  loc?: unknown[];
+  msg?: string;
+};
+
+function getOrderErrorMessage(
+  detail: string | ApiValidationError[] | undefined,
+): string | null {
+  if (typeof detail === "string") return detail;
+  if (!Array.isArray(detail) || detail.length === 0) return null;
+
+  return detail
+    .map((error) => {
+      const field = Array.isArray(error.loc)
+        ? error.loc.filter((part) => part !== "body").join(".")
+        : "";
+      const message = typeof error.msg === "string" ? error.msg : "";
+      return field && message ? `${field}: ${message}` : message || field;
+    })
+    .filter(Boolean)
+    .join(" ");
+}
+
 /** What was ordered — frozen before the cart store is cleared. */
 export type CheckoutReceipt = {
   lines: CartLine[];
   orderNumber: string | null;
+  emailConfirmationStatus: "sent" | "failed" | "disabled";
+  smsConfirmationStatus: "sent" | "failed" | "disabled";
   subtotal: number;
   shipping: number;
   discount: number;
@@ -236,13 +264,12 @@ export function CheckoutForm({ onPlaced }: Props) {
     setFailure(null);
 
     try {
-      const res = await fetch(`${API_URL}/api/orders`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      let data: OrderResponse;
+      try {
+        const response = await apiClient.post<OrderResponse>("/api/orders", {
           customer_name: values.customer_name,
           phone: values.phone,
-          email: values.email || null,
+          email: values.email,
           address_line: values.address_line,
           city: values.city,
           state: values.state || null,
@@ -255,34 +282,37 @@ export function CheckoutForm({ onPlaced }: Props) {
             variant_id: line.variantId,
             qty: line.qty,
           })),
-        }),
-      });
-
-      const data = (await res.json().catch(() => null)) as
-        | (OrderResponse & { detail?: string })
-        | null;
-      if (!res.ok) {
-        const detail =
-          typeof data?.detail === "string"
-            ? data.detail
-            : "The order could not be placed. Please review your details.";
-        throw new Error(detail);
+        });
+        data = response.data;
+      } catch (error) {
+        const detail = axios.isAxiosError<{ detail?: string | ApiValidationError[] }>(error)
+          ? getOrderErrorMessage(error.response?.data?.detail)
+          : null;
+        throw new Error(
+          detail ??
+            getApiErrorMessage(
+              error,
+              "The order could not be placed. Please review your details.",
+            ),
+        );
       }
 
-      const confirmedMode = data?.delivery_mode ?? values.delivery_mode;
-      const confirmedCountry = data?.country_code ?? values.country_code;
+      const confirmedMode = data.delivery_mode ?? values.delivery_mode;
+      const confirmedCountry = data.country_code ?? values.country_code;
       const receipt: CheckoutReceipt = {
         lines,
-        orderNumber: typeof data?.order_number === "string" ? data.order_number : null,
-        subtotal: data?.subtotal ?? subtotal,
-        shipping: data?.shipping_amount ?? shipping,
-        discount: data?.discount_amount ?? discount,
-        promoCode: data?.coupon_code ?? promoCode,
-        total: data?.total ?? total,
+        orderNumber: typeof data.order_number === "string" ? data.order_number : null,
+        emailConfirmationStatus: data.email_confirmation_status ?? "failed",
+        smsConfirmationStatus: data.sms_confirmation_status ?? "failed",
+        subtotal: data.subtotal ?? subtotal,
+        shipping: data.shipping_amount ?? shipping,
+        discount: data.discount_amount ?? discount,
+        promoCode: data.coupon_code ?? promoCode,
+        total: data.total ?? total,
         deliveryMode: confirmedMode,
         countryCode: confirmedCountry,
         countryName: confirmedMode === "domestic" ? "India" : getShippingDestination(confirmedCountry).name,
-        paymentStatus: data?.payment_status ?? "pending_offline",
+        paymentStatus: data.payment_status ?? "pending_offline",
       };
 
       setPlaced(receipt);
@@ -317,8 +347,18 @@ export function CheckoutForm({ onPlaced }: Props) {
             <p className="text-xs font-semibold tracking-wide text-ink-600 uppercase">Order reference</p>
             <p className="mt-1 font-display text-2xl font-semibold text-ink-950">{placed.orderNumber}</p>
             <p className="mt-2 text-xs leading-relaxed text-ink-600">
-              Keep this reference on this page. Automated email and SMS confirmations are not
-              being sent yet.
+              Keep this reference for tracking.{" "}
+              {placed.emailConfirmationStatus === "sent"
+                ? "An order confirmation was sent to your email address."
+                : placed.emailConfirmationStatus === "disabled"
+                  ? "Email confirmations are currently disabled; keep this reference to track your order."
+                  : "We received your order, but could not send the confirmation email. Keep this reference to track your order."}
+              {" "}
+              {placed.smsConfirmationStatus === "sent"
+                ? "An SMS confirmation was also sent."
+                : placed.smsConfirmationStatus === "failed"
+                  ? "We could not send the SMS confirmation."
+                  : ""}
             </p>
           </div>
         ) : null}
@@ -559,7 +599,7 @@ export function CheckoutForm({ onPlaced }: Props) {
 
             <div>
               <label htmlFor="email" className="field-label">
-                Email <span className="font-normal text-ink-400">(optional)</span>
+                Email <span className="text-masala-700">(required for order confirmation)</span>
               </label>
               <input
                 id="email"
@@ -568,14 +608,18 @@ export function CheckoutForm({ onPlaced }: Props) {
                 placeholder="you@example.com"
                 className="input"
                 aria-invalid={errors.email ? true : undefined}
-                aria-describedby={errors.email ? "email-error" : undefined}
+                aria-describedby={errors.email ? "email-error" : "email-hint"}
                 {...register("email")}
               />
               {errors.email ? (
                 <p id="email-error" className="field-error">
                   {errors.email.message}
                 </p>
-              ) : null}
+              ) : (
+                <p id="email-hint" className="field-hint">
+                  We&apos;ll send your order confirmation to this address.
+                </p>
+              )}
             </div>
           </div>
         </fieldset>

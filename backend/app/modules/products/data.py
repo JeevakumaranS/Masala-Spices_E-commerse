@@ -5,19 +5,12 @@ from typing import Any
 from app.common.images import unsplash
 
 
-def _image(image_id: int, photo_id: str, alt: str) -> dict[str, Any]:
-    return {
-        "id": image_id,
-        "url": unsplash(photo_id),
-        "alt_text": alt,
-        "sort_order": 1,
-        "image_type": "pack_shot",
-    }
+def _image(url: str, alt: str) -> str:
+    return url
 
 
 sample_products: list[dict[str, Any]] = [
     {
-        "id": 1,
         "name": "Sambar Masala",
         "slug": "sambar-masala",
         "description": "A balanced, tangy spice mix for sambar, vegetables and lentils.",
@@ -36,7 +29,6 @@ sample_products: list[dict[str, Any]] = [
         "categories": ["breakfast-masalas", "south-indian"],
         "variants": [
             {
-                "id": 101,
                 "pack_size": "250g",
                 "price": 199,
                 "mrp": 240,
@@ -45,7 +37,6 @@ sample_products: list[dict[str, Any]] = [
                 "expiry_date": "2026-12-15",
             },
             {
-                "id": 102,
                 "pack_size": "500g",
                 "price": 349,
                 "mrp": 420,
@@ -55,15 +46,10 @@ sample_products: list[dict[str, Any]] = [
             },
         ],
         "images": [
-            _image(
-                1001,
-                "photo-1596040033229-a9821ebd058d",
-                "Sambar masala pack",
-            )
+            unsplash("photo-1596040033229-a9821ebd058d"),
         ],
     },
     {
-        "id": 2,
         "name": "Biriyani Masala",
         "slug": "biriyani-masala",
         "description": "Aromatic and layered for restaurant-style biryani and rice dishes.",
@@ -82,7 +68,6 @@ sample_products: list[dict[str, Any]] = [
         "categories": ["north-indian"],
         "variants": [
             {
-                "id": 201,
                 "pack_size": "200g",
                 "price": 259,
                 "mrp": 310,
@@ -92,15 +77,10 @@ sample_products: list[dict[str, Any]] = [
             }
         ],
         "images": [
-            _image(
-                2001,
-                "photo-1509358271058-acd22cc93898",
-                "Biriyani masala pack",
-            )
+            unsplash("photo-1509358271058-acd22cc93898"),
         ],
     },
     {
-        "id": 3,
         "name": "Garam Masala",
         "slug": "garam-masala",
         "description": "Warming finishing blend of roasted whole spices, ground cool the same morning.",
@@ -119,7 +99,6 @@ sample_products: list[dict[str, Any]] = [
         "categories": ["north-indian", "breakfast-masalas"],
         "variants": [
             {
-                "id": 301,
                 "pack_size": "100g",
                 "price": 149,
                 "mrp": 185,
@@ -128,7 +107,6 @@ sample_products: list[dict[str, Any]] = [
                 "expiry_date": "2027-01-10",
             },
             {
-                "id": 302,
                 "pack_size": "250g",
                 "price": 329,
                 "mrp": 405,
@@ -138,15 +116,10 @@ sample_products: list[dict[str, Any]] = [
             },
         ],
         "images": [
-            _image(
-                3001,
-                "photo-1604908176997-125f25cc6f3d",
-                "Garam masala pack",
-            )
+            unsplash("photo-1604908176997-125f25cc6f3d"),
         ],
     },
     {
-        "id": 4,
         "name": "Rasam Podi",
         "slug": "rasam-podi",
         "description": "Peppery, tangy podi that turns a bowl of rasam into a five-minute dinner.",
@@ -165,7 +138,6 @@ sample_products: list[dict[str, Any]] = [
         "categories": ["south-indian", "breakfast-masalas"],
         "variants": [
             {
-                "id": 401,
                 "pack_size": "200g",
                 "price": 169,
                 "mrp": 199,
@@ -175,15 +147,10 @@ sample_products: list[dict[str, Any]] = [
             }
         ],
         "images": [
-            _image(
-                4001,
-                "photo-1596797038530-2c107229654b",
-                "Rasam podi pack",
-            )
+            unsplash("photo-1596797038530-2c107229654b"),
         ],
     },
     {
-        "id": 5,
         "name": "Chettinad Masala",
         "slug": "chettinad-masala",
         "description": "Fiery roasted blend from the Chettinad kitchens — built for pepper-forward curries.",
@@ -202,7 +169,6 @@ sample_products: list[dict[str, Any]] = [
         "categories": ["south-indian"],
         "variants": [
             {
-                "id": 501,
                 "pack_size": "200g",
                 "price": 279,
                 "mrp": 349,
@@ -212,15 +178,10 @@ sample_products: list[dict[str, Any]] = [
             }
         ],
         "images": [
-            _image(
-                5001,
-                "photo-1552332386-f8dd00dc2f85",
-                "Chettinad masala pack",
-            )
+            unsplash("photo-1552332386-f8dd00dc2f85"),
         ],
     },
     {
-        "id": 6,
         "name": "Pav Bhaji Masala",
         "slug": "pav-bhaji-masala",
         "description": "Street-cart classic: coriander-forward with just enough chilli to keep it honest.",
@@ -239,7 +200,6 @@ sample_products: list[dict[str, Any]] = [
         "categories": ["north-indian", "breakfast-masalas"],
         "variants": [
             {
-                "id": 601,
                 "pack_size": "200g",
                 "price": 159,
                 "mrp": 195,
@@ -249,11 +209,7 @@ sample_products: list[dict[str, Any]] = [
             }
         ],
         "images": [
-            _image(
-                6001,
-                "photo-1601050690597-df0568f70950",
-                "Pav bhaji masala pack",
-            )
+            unsplash("photo-1601050690597-df0568f70950"),
         ],
     },
 ]

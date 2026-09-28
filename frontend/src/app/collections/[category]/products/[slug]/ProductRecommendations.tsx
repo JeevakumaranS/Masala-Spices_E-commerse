@@ -51,7 +51,7 @@ function RecommendationRail({ title, products }: { title: string; products: Prod
         <h2 className="section-title">{title}</h2>
         <span className="text-sm text-ink-500">{products.length} suggestions</span>
       </div>
-      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+      <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
         {products.map((item) => <ProductCard key={item.id} product={item} density="compact" />)}
       </div>
     </div>

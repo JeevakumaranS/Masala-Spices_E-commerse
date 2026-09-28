@@ -6,7 +6,6 @@ from app.common.images import unsplash
 
 sample_blog_posts: list[dict[str, Any]] = [
     {
-        "id": 1,
         "title": "Why our masalas taste different",
         "slug": "why-our-masalas-taste-different",
         "category": "Sourcing",
@@ -23,7 +22,6 @@ sample_blog_posts: list[dict[str, Any]] = [
         ),
     },
     {
-        "id": 2,
         "title": "A pantry guide to home cooking",
         "slug": "pantry-guide-to-home-cooking",
         "category": "Basics",
@@ -39,7 +37,6 @@ sample_blog_posts: list[dict[str, Any]] = [
         ),
     },
     {
-        "id": 3,
         "title": "The right way to store whole spices",
         "slug": "store-whole-spices",
         "category": "Basics",
@@ -55,7 +52,6 @@ sample_blog_posts: list[dict[str, Any]] = [
         ),
     },
     {
-        "id": 4,
         "title": "Five weeknight dinners one masala can fix",
         "slug": "weeknight-dinners-one-masala",
         "category": "Recipes",

@@ -39,7 +39,6 @@ async def seed() -> None:
                 {
                     key: product[key]
                     for key in (
-                        "id",
                         "name",
                         "slug",
                         "description",
@@ -59,14 +58,28 @@ async def seed() -> None:
                 }
             )
             for variant in product["variants"]:
-                item = dict(variant)
-                item["product_id"] = product["id"]
-                if item.get("expiry_date"):
-                    item["expiry_date"] = date.fromisoformat(item["expiry_date"])
-                variants.append(item)
+                item = {
+                    "pack_size": variant["pack_size"],
+                    "price": variant["price"],
+                    "mrp": variant["mrp"],
+                    "stock_qty": variant["stock_qty"],
+                    "sku": variant["sku"],
+                }
+                if variant.get("expiry_date"):
+                    item["expiry_date"] = date.fromisoformat(variant["expiry_date"])
+                variants.append((product["slug"], item))
 
-        await session.execute(insert(products_table).values(products))
-        await session.execute(insert(variants_table).values(variants))
+        # Insert products and capture their UUIDs
+        result = await session.execute(
+            insert(products_table).returning(products_table.c.id, products_table.c.slug)
+        )
+        slug_to_id = {row.slug: row.id for row in result}
+
+        # Insert variants with correct product UUIDs
+        for slug, variant_data in variants:
+            variant_data["product_id"] = slug_to_id[slug]
+            await session.execute(insert(variants_table).values(**variant_data))
+
         await session.execute(insert(recipes_table).values(sample_recipes))
         await session.commit()
 

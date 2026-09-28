@@ -1,10 +1,12 @@
 """Recipe request and response schemas."""
 
+from uuid import UUID
+
 from pydantic import BaseModel, Field
 
 
 class Recipe(BaseModel):
-    id: int
+    id: UUID
     title: str
     slug: str
     cook_time_minutes: int

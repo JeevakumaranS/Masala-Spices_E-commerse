@@ -25,7 +25,8 @@ backend/
 │   └── main.py                   # uvicorn entry point
 ├── alembic/                      # database migrations
 ├── scripts/                      # development and maintenance scripts
-└── requirements.txt
+├── requirements.txt
+└── requirements-dev.txt          # pytest and backend test dependencies
 ```
 
 ## Adding a module
@@ -39,23 +40,33 @@ backend/
 Run the application from this directory with:
 
 ```bash
-.venv\Scripts\python.exe -m uvicorn app.main:app --port 8000
+.venv\Scripts\python.exe -m uvicorn app.main:app --port 8080
 ```
 
 ## Environment and database setup
 
-Copy `.env.example` to `.env`, set `DATABASE_URL`, an `ADMIN_TOKEN_SECRET`
-containing at least 32 random bytes, and a unique `ADMIN_BOOTSTRAP_SECRET`.
-Apply migrations, then use the first-admin registration page or
-`POST /api/admin/register` with the bootstrap secret to create the initial
-database-backed administrator. The bootstrap secret only works until that
-first account has been committed. Later registrations require an active admin
-bearer token. Admin passwords are stored as salted scrypt hashes; no admin
+Copy `.env.example` to `.env`, set `DATABASE_URL` and an `ADMIN_TOKEN_SECRET`
+containing at least 32 random bytes. Apply migrations, then use the first-admin
+registration page to create the initial database-backed administrator with an
+email address and password from localhost. First-admin registration closes
+once an account exists; later registrations require an active admin bearer
+token. Admin passwords are stored as salted scrypt hashes; no admin
 credentials are hard-coded or stored in environment variables. The login
 endpoint is `POST /api/admin/login`; use its bearer token for every
 `/api/admin/*` data endpoint and the legacy `/api/analytics/summary` endpoint.
 Tokens expire after eight hours and are rejected when the corresponding
 administrator is inactive or no longer exists.
+
+## API smoke tests
+
+Install the development dependencies and run the API smoke tests from the
+`backend` directory. The collection endpoint tests use the configured local
+database; they only issue read requests. Notification providers are not called.
+
+```powershell
+.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
+.\.venv\Scripts\python.exe -m pytest
+```
 
 Apply schema changes after configuring the database:
 
@@ -63,21 +74,45 @@ Apply schema changes after configuring the database:
 .\.venv\Scripts\python.exe -m alembic upgrade head
 ```
 
+Use PostgreSQL 18 or later. Primary keys are UUIDv7; list-valued catalog,
+coupon, and recipe fields use PostgreSQL `text[]` columns instead of JSON.
+Existing integer keys are migrated to UUIDv7 while remapping their foreign-key
+references, and existing JSON lists are converted in place by the migration.
+
 Admin products support nested variants (pack size, SKU, price, stock, batch and
-expiry), image records, category tags and product facets. Orders created through
+expiry), image URL arrays, category tags and product facets. Orders created through
 the storefront are persisted, reviewed through the admin order routes, and
-retained across restarts. Review submissions are pending moderation by default.
+retained across restarts. Order references use a sequential `MAS-` prefix and
+exactly five digits (for example, `MAS-00001`); guest tracking checks the
+reference together with the checkout phone number. Admins move orders through
+placed, processing, shipped, and delivered in order. A courier partner and
+tracking ID are required before shipping; both appear in guest order tracking.
+Brevo sends a status-specific customer email at order placement and on each
+subsequent status transition. Review submissions are pending moderation by
+default.
 
 ## Admin API contracts
 
 All data endpoints below require `Authorization: Bearer <access_token>` and use
 JSON. `POST /api/admin/login` accepts `{ "email": "...", "password": "..." }`
 and returns `{ "access_token": "...", "token_type": "bearer" }`.
-`GET /api/admin/registration-status` reports whether accounts exist and whether
-first-admin setup is configured. `POST /api/admin/register` accepts an email
-and a password (12–128 characters); include `bootstrap_secret` only for the
-first account. Subsequent registrations require an admin bearer token.
+`GET /api/admin/registration-status` reports whether accounts exist.
+`POST /api/admin/register` accepts an email and a password (12–128 characters).
+The first account can be registered without authentication; subsequent
+registrations require an admin bearer token.
 `GET /api/admin/admins` lists account metadata for authenticated admins.
+`GET` and `PUT /api/admin/integration-settings` manage the SMS/email enable
+switches and provider credentials. Email order confirmations use Brevo's
+transactional email endpoint (`POST /v3/smtp/email`), not the campaigns
+endpoint. Configure a Brevo API v3 key and a sender identity verified in Brevo
+in the admin settings. SMS order confirmations use Twilio Programmable Messaging;
+configure the Account SID, Auth Token, and an SMS-capable sender phone in E.164
+format. Both providers' credentials are encrypted at rest with a key derived
+from `ADMIN_TOKEN_SECRET`; keep that secret stable or the stored credentials
+cannot be decrypted. Secrets are only revealed through the authenticated,
+non-cacheable reveal endpoint. Checkout requires the customer's email. Orders
+are saved before notifications are sent; provider failures are logged and
+reported as per-channel confirmation statuses without discarding the order.
 
 | Method and path | Contract |
 | --- | --- |

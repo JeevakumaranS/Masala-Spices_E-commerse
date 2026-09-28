@@ -1,10 +1,12 @@
 """Category request and response schemas."""
 
+from uuid import UUID
+
 from pydantic import BaseModel
 
 
 class Category(BaseModel):
-    id: int
+    id: UUID
     name: str
     slug: str
     type: str = "product_type"

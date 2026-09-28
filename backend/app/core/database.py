@@ -1,10 +1,28 @@
 """Async SQLAlchemy database access."""
 
 import os
+import secrets
+import time
 from collections.abc import AsyncIterator
+from uuid import UUID
 
 from dotenv import load_dotenv
-from sqlalchemy import JSON, Boolean, Column, Date, DateTime, Integer, MetaData, Numeric, String, Table, Text
+from sqlalchemy import (
+    JSON,
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    MetaData,
+    Numeric,
+    String,
+    Table,
+    Text,
+    Uuid,
+)
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 load_dotenv()
@@ -18,15 +36,29 @@ engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
 metadata = MetaData()
 
+
+def _uuid7_default() -> UUID:
+    random_bits = secrets.randbits(74)
+    timestamp_ms = time.time_ns() // 1_000_000
+    value = (
+        ((timestamp_ms & ((1 << 48) - 1)) << 80)
+        | (0x7 << 76)
+        | (((random_bits >> 62) & 0xFFF) << 64)
+        | (0b10 << 62)
+        | (random_bits & ((1 << 62) - 1))
+    )
+    return UUID(int=value)
+
+
 categories_table = Table(
     "categories",
     metadata,
-    Column("id", Integer),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
     Column("name", String),
     Column("slug", String),
     Column("type", String),
     Column("description", Text),
-    Column("parent_id", Integer),
+    Column("parent_id", Uuid, ForeignKey("categories.id")),
     Column("seo_title", String),
     Column("seo_description", Text),
     Column("created_at", DateTime),
@@ -34,18 +66,18 @@ categories_table = Table(
 products_table = Table(
     "products",
     metadata,
-    Column("id", Integer),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
     Column("name", String),
     Column("slug", String),
     Column("description", Text),
-    Column("ingredients", JSON),
+    Column("ingredients", ARRAY(String)),
     Column("price", Numeric),
     Column("mrp", Numeric),
     Column("discount_pct", Integer),
     Column("spice_level", String),
     Column("status", String),
-    Column("categories", JSON),
-    Column("images", JSON),
+    Column("categories", ARRAY(String)),
+    Column("images", ARRAY(String)),
     Column("dish_type", String),
     Column("is_veg", Boolean),
     Column("contains_ginger_garlic", Boolean),
@@ -56,8 +88,8 @@ products_table = Table(
 variants_table = Table(
     "product_variants",
     metadata,
-    Column("id", Integer),
-    Column("product_id", Integer),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
+    Column("product_id", Uuid, ForeignKey("products.id", ondelete="CASCADE")),
     Column("pack_size", String),
     Column("price", Numeric),
     Column("mrp", Numeric),
@@ -69,35 +101,85 @@ variants_table = Table(
 admin_users_table = Table(
     "admin_users",
     metadata,
-    Column("id", Integer, primary_key=True),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
     Column("email", String),
     Column("password_hash", String),
     Column("is_active", Boolean),
     Column("created_at", DateTime),
 )
-admin_registration_state_table = Table(
-    "admin_registration_state",
+admin_integration_settings_table = Table(
+    "admin_integration_settings",
     metadata,
-    Column("id", Integer, primary_key=True),
-    Column("bootstrap_complete", Boolean),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
+    Column("sms_enabled", Boolean),
+    Column("email_enabled", Boolean),
+    Column("sms_api_key_encrypted", Text),
+    Column("sms_account_sid_encrypted", Text),
+    Column("sms_sender_phone", String),
+    Column("email_api_key_encrypted", Text),
+    Column("email_sender_name", String),
+    Column("email_sender_email", String),
+    Column("updated_at", DateTime),
 )
-
 orders_table = Table(
     "orders",
     metadata,
-    Column("id", Integer, primary_key=True),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
     Column("order_number", String),
     Column("phone", String),
     Column("email", String),
     Column("status", String),
     Column("total", Numeric),
-    Column("created_at", DateTime),
-    Column("order_data", JSON),
+    Column("created_at", DateTime(timezone=True)),
+    Column("customer_name", String),
+    Column("payment_status", String),
+    Column("subtotal", Numeric),
+    Column("shipping_amount", Numeric),
+    Column("discount_amount", Numeric),
+    Column("coupon_code", String),
+    Column("coupon_label", String),
+    Column("delivery_mode", String),
+    Column("country_code", String),
+    Column("shipping_note", Text),
+    Column("item_count", Integer),
+    Column("address_line", Text),
+    Column("city", String),
+    Column("state", String),
+    Column("postal_code", String),
+    Column("admin_note", Text),
+    Column("payment_note", Text),
+    Column("tracking_id", String),
+    Column("courier_partner", String),
+)
+order_items_table = Table(
+    "order_items",
+    metadata,
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
+    Column("order_id", Uuid, ForeignKey("orders.id", ondelete="CASCADE")),
+    Column("product_id", Uuid),
+    Column("variant_id", Uuid),
+    Column("name", String),
+    Column("pack_size", String),
+    Column("sku", String),
+    Column("dish_type", String),
+    Column("categories", ARRAY(String)),
+    Column("price", Numeric),
+    Column("qty", Integer),
+    Column("line_total", Numeric),
+)
+order_history_table = Table(
+    "order_history",
+    metadata,
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
+    Column("order_id", Uuid, ForeignKey("orders.id", ondelete="CASCADE")),
+    Column("status", String),
+    Column("changed_at", DateTime(timezone=True)),
+    Column("note", Text),
 )
 coupons_table = Table(
     "coupons",
     metadata,
-    Column("id", Integer, primary_key=True),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
     Column("code", String),
     Column("kind", String),
     Column("label", String),
@@ -109,14 +191,14 @@ coupons_table = Table(
     Column("ends_at", Date),
     Column("buy_quantity", Integer),
     Column("free_quantity", Integer),
-    Column("eligible_terms", JSON),
+    Column("eligible_terms", ARRAY(String)),
     Column("first_order_only", Boolean),
 )
 reviews_table = Table(
     "product_reviews",
     metadata,
-    Column("id", Integer, primary_key=True),
-    Column("product_id", Integer),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
+    Column("product_id", Uuid, ForeignKey("products.id", ondelete="CASCADE")),
     Column("reviewer_name", String),
     Column("rating", Integer),
     Column("comment", Text),
@@ -126,14 +208,14 @@ reviews_table = Table(
 recipes_table = Table(
     "recipes",
     metadata,
-    Column("id", Integer),
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
     Column("title", String),
     Column("slug", String),
     Column("cook_time_minutes", Integer),
     Column("cuisine", String),
     Column("dish_type", String),
-    Column("ingredients", JSON),
-    Column("steps", JSON),
+    Column("ingredients", ARRAY(String)),
+    Column("steps", ARRAY(String)),
     Column("hero_image_url", Text),
     Column("video_url", Text),
 )

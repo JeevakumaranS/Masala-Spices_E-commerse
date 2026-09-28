@@ -6,7 +6,6 @@ from app.common.images import unsplash
 
 sample_recipes: list[dict[str, Any]] = [
     {
-        "id": 1,
         "title": "Coconut Sambar",
         "slug": "coconut-sambar",
         "cook_time_minutes": 30,
@@ -26,7 +25,6 @@ sample_recipes: list[dict[str, Any]] = [
         "hero_image_url": unsplash("photo-1546833999-b9f581a1996d"),
     },
     {
-        "id": 2,
         "title": "Restaurant Style Biryani",
         "slug": "restaurant-style-biryani",
         "cook_time_minutes": 55,
@@ -46,7 +44,6 @@ sample_recipes: list[dict[str, Any]] = [
         "hero_image_url": unsplash("photo-1563379091339-03b21ab4a4f8"),
     },
     {
-        "id": 3,
         "title": "Chettinad Pepper Chicken",
         "slug": "chettinad-pepper-chicken",
         "cook_time_minutes": 45,
@@ -66,7 +63,6 @@ sample_recipes: list[dict[str, Any]] = [
         "hero_image_url": unsplash("photo-1585937421612-70a008356fbe"),
     },
     {
-        "id": 4,
         "title": "Podi Idli",
         "slug": "podi-idli",
         "cook_time_minutes": 20,
@@ -86,7 +82,6 @@ sample_recipes: list[dict[str, Any]] = [
         "hero_image_url": unsplash("photo-1631209121750-a9f656d28f46"),
     },
     {
-        "id": 5,
         "title": "Weeknight Pav Bhaji",
         "slug": "weeknight-pav-bhaji",
         "cook_time_minutes": 35,
@@ -106,7 +101,6 @@ sample_recipes: list[dict[str, Any]] = [
         "hero_image_url": unsplash("photo-1567188040759-fb8a883dc6d8"),
     },
     {
-        "id": 6,
         "title": "Coconut Rasam",
         "slug": "coconut-rasam",
         "cook_time_minutes": 25,

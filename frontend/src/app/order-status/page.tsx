@@ -1,5 +1,6 @@
 "use client";
 
+import axios from "axios";
 import { useState } from "react";
 import Link from "next/link";
 import { useForm } from "react-hook-form";
@@ -9,6 +10,7 @@ import { cn } from "@/lib/cn";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Reveal } from "@/components/ui/Reveal";
+import { apiClient } from "@/lib/http";
 import { useUIStore } from "@/store/ui";
 import {
   AlertIcon,
@@ -17,8 +19,6 @@ import {
   InfoIcon,
   RefreshIcon,
 } from "@/components/ui/icons";
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 function normalizePhoneDigits(raw: string): string {
   return raw.replace(/\D/g, "");
@@ -34,7 +34,7 @@ const trackSchema = z.object({
     .string()
     .trim()
     .min(1, "Order number is required.")
-    .regex(/^MAS-\d{3,10}$/i, "Looks like MAS-1001 — letters MAS, a dash, then 3–10 digits."),
+    .regex(/^MAS-\d{5}$/i, "Enter your 5-digit order reference, for example MAS-00001."),
   phone: z
     .string()
     .trim()
@@ -46,20 +46,18 @@ type TrackValues = z.infer<typeof trackSchema>;
 
 type LookupResult = {
   order_number: string;
-  status: string;
+  status: "placed" | "processing" | "shipped" | "delivered";
+  tracking_id: string | null;
+  courier_partner: string | null;
 };
 
 type Phase = "idle" | "loading" | "success" | "error";
 
-const STAGES = [
-  {
-    label: "Received",
-    aliases: ["received", "placed", "new", "pending", "open", "created"],
-  },
-  { label: "Confirmed", aliases: ["confirmed", "accepted"] },
-  { label: "Packed", aliases: ["packed", "packing", "processing"] },
-  { label: "Shipped", aliases: ["shipped", "in transit", "in_transit", "intransit", "dispatched"] },
-  { label: "Delivered", aliases: ["delivered", "completed", "complete"] },
+const STAGES: { label: string; status: LookupResult["status"] }[] = [
+  { label: "Placed", status: "placed" },
+  { label: "Processing", status: "processing" },
+  { label: "Shipped", status: "shipped" },
+  { label: "Delivered", status: "delivered" },
 ];
 
 export default function OrderStatusPage() {
@@ -86,25 +84,33 @@ export default function OrderStatusPage() {
 
     try {
       const orderNumber = values.order_number.trim().toUpperCase();
-      const res = await fetch(
-        `${API_URL}/api/orders/${encodeURIComponent(orderNumber)}?phone=${encodeURIComponent(values.phone.trim())}`,
-      );
-
-      if (!res.ok) throw new Error(res.status === 404 ? "not-found" : `status-${res.status}`);
-
-      const data = (await res.json().catch(() => null)) as {
+      const response = await apiClient.get<{
         order_number?: unknown;
         status?: unknown;
-      } | null;
+        tracking_id?: unknown;
+        courier_partner?: unknown;
+      }>(`/api/orders/${encodeURIComponent(orderNumber)}`, {
+        params: { phone: values.phone.trim() },
+      });
+      const data = response.data;
+      const orderStatus =
+        data?.status === "placed" ||
+        data?.status === "processing" ||
+        data?.status === "shipped" ||
+        data?.status === "delivered"
+          ? data.status
+          : "placed";
 
       setResult({
         order_number:
           data && typeof data.order_number === "string" ? data.order_number : orderNumber,
-        status: data && typeof data.status === "string" ? data.status : "unknown",
+        status: orderStatus,
+        tracking_id: typeof data?.tracking_id === "string" ? data.tracking_id : null,
+        courier_partner: typeof data?.courier_partner === "string" ? data.courier_partner : null,
       });
       setPhase("success");
     } catch (error) {
-      const notFound = error instanceof Error && error.message === "not-found";
+      const notFound = axios.isAxiosError(error) && error.response?.status === 404;
       const info = notFound
         ? {
             title: "Order not found",
@@ -131,8 +137,7 @@ export default function OrderStatusPage() {
     reset();
   };
 
-  const statusNorm = (result?.status ?? "").trim().toLowerCase();
-  const activeIndex = STAGES.findIndex((stage) => stage.aliases.includes(statusNorm));
+  const activeIndex = STAGES.findIndex((stage) => stage.status === result?.status);
 
   return (
     <section className="shell py-14 md:py-20">
@@ -169,7 +174,7 @@ export default function OrderStatusPage() {
                   <input
                     id="order_number"
                     type="text"
-                    placeholder="MAS-1001"
+                    placeholder="MAS-00001"
                     autoComplete="off"
                     className="input"
                     aria-invalid={errors.order_number ? true : undefined}
@@ -184,8 +189,7 @@ export default function OrderStatusPage() {
                     </p>
                   ) : (
                     <p id="order_number-hint" className="field-hint">
-                      Shown on your checkout confirmation — e.g. MAS-1001. Automated email and SMS
-                      confirmations are not enabled yet.
+                      Shown on your checkout confirmation and order confirmation email — e.g. MAS-00001.
                     </p>
                   )}
                 </div>
@@ -241,7 +245,7 @@ export default function OrderStatusPage() {
                   </p>
                   <p className="mt-1.5 text-sm leading-relaxed text-ink-600">
                     It&apos;s shown on your checkout confirmation — keep the reference handy. It
-                    always looks like <span className="chip font-semibold text-ink-800">MAS-1001</span>. No
+                    always looks like <span className="chip font-semibold text-ink-800">MAS-00001</span>. No
                     order yet?{" "}
                     <Link
                       href="/collections/breakfast-masalas"
@@ -298,99 +302,94 @@ export default function OrderStatusPage() {
                   </span>
                 </div>
 
-                {activeIndex === -1 ? (
-                  /* ---- Status outside the standard pipeline → prominent card ---- */
-                  <div className="p-5 sm:p-6">
-                    <div className="rounded-3xl border border-saffron-300 bg-saffron-50 p-6 text-center">
-                      <p className="eyebrow">Current status</p>
-                      <p className="mt-3 font-display text-3xl font-semibold text-ink-950 capitalize">
-                        {result.status}
-                      </p>
-                      <p className="mx-auto mt-2 max-w-md text-sm leading-relaxed text-ink-600">
-                        This stage isn&apos;t part of the standard pipeline yet — our kitchen team
-                        knows exactly where your order is and will keep you posted.
-                      </p>
-                    </div>
+                {result.status === "shipped" || result.status === "delivered" ? (
+                  <div className="mx-5 mt-5 rounded-2xl border border-cardamom-200 bg-cardamom-50 p-4 sm:mx-6">
+                    <h2 className="font-semibold text-ink-950">Shipment tracking</h2>
+                    <dl className="mt-2 grid gap-2 text-sm sm:grid-cols-2">
+                      <div>
+                        <dt className="text-xs text-ink-500">Courier partner</dt>
+                        <dd className="font-medium text-ink-900">{result.courier_partner ?? "Not provided"}</dd>
+                      </div>
+                      <div>
+                        <dt className="text-xs text-ink-500">Tracking ID</dt>
+                        <dd className="break-all font-medium text-ink-900">{result.tracking_id ?? "Not provided"}</dd>
+                      </div>
+                    </dl>
                   </div>
-                ) : (
-                  <>
-                    <ol className="px-5 py-6 sm:px-6">
-                      {STAGES.map((stage, index) => {
-                        const done = index < activeIndex;
-                        const active = index === activeIndex;
+                ) : null}
 
-                        return (
-                          <li
-                            key={stage.label}
-                            aria-current={active ? "step" : undefined}
-                            className="relative flex gap-4 pb-6 last:pb-0"
-                          >
-                            {index < STAGES.length - 1 ? (
-                              <span
-                                aria-hidden="true"
-                                className={cn(
-                                  "absolute top-10 bottom-0 left-[17px] w-0.5 rounded-full",
-                                  index < activeIndex ? "bg-cardamom-500" : "bg-paper-200",
-                                )}
-                              />
-                            ) : null}
+                <>
+                  <ol className="px-5 py-6 sm:px-6">
+                    {STAGES.map((stage, index) => {
+                      const reached = index <= activeIndex;
+                      const active = index === activeIndex;
 
+                      return (
+                        <li
+                          key={stage.label}
+                          aria-current={active ? "step" : undefined}
+                          className="relative flex gap-4 pb-6 last:pb-0"
+                        >
+                          {index < STAGES.length - 1 ? (
                             <span
+                              aria-hidden="true"
                               className={cn(
-                                "relative grid size-9 shrink-0 place-items-center rounded-full border-2 text-xs font-bold",
-                                done &&
-                                  "border-cardamom-500 bg-cardamom-500 text-white",
-                                active &&
-                                  "border-masala-600 bg-white text-masala-700 ring-4 ring-masala-100",
-                                !done &&
-                                  !active &&
-                                  "border-paper-300 bg-white text-ink-400",
+                                "absolute top-10 bottom-0 left-[17px] w-0.5 rounded-full",
+                                index < activeIndex ? "bg-cardamom-500" : "bg-paper-200",
+                              )}
+                            />
+                          ) : null}
+
+                          <span
+                            className={cn(
+                              "relative grid size-9 shrink-0 place-items-center rounded-full border-2 text-xs font-bold",
+                              reached &&
+                                "border-cardamom-500 bg-cardamom-500 text-white",
+                              active && "ring-4 ring-masala-100",
+                              !reached &&
+                                !active &&
+                                "border-paper-300 bg-white text-ink-400",
+                            )}
+                          >
+                            {reached ? <CheckIcon className="size-4" /> : index + 1}
+                          </span>
+
+                          <div className="pt-1.5">
+                            <p
+                              className={cn(
+                                "text-sm font-semibold",
+                                active
+                                  ? "text-masala-700"
+                                  : reached
+                                    ? "text-ink-900"
+                                    : "text-ink-400",
                               )}
                             >
-                              {done ? (
-                                <CheckIcon className="size-4" />
-                              ) : (
-                                index + 1
-                              )}
-                            </span>
+                              {stage.label}
+                            </p>
+                            <p className="mt-0.5 text-xs text-ink-500">
+                              {active
+                                ? "Current stage"
+                                : reached
+                                  ? "Completed"
+                                  : "Awaiting this stage"}
+                            </p>
+                          </div>
+                        </li>
+                      );
+                    })}
+                  </ol>
 
-                            <div className="pt-1.5">
-                              <p
-                                className={cn(
-                                  "text-sm font-semibold",
-                                  active
-                                    ? "text-masala-700"
-                                    : done
-                                      ? "text-ink-900"
-                                      : "text-ink-400",
-                                )}
-                              >
-                                {stage.label}
-                              </p>
-                              <p className="mt-0.5 text-xs text-ink-500">
-                                {active
-                                  ? "Current stage"
-                                  : done
-                                    ? "Completed"
-                                    : "Awaiting this stage"}
-                              </p>
-                            </div>
-                          </li>
-                        );
-                      })}
-                    </ol>
-
-                    <div className="flex flex-wrap gap-3 border-t border-paper-200 px-5 py-4 sm:px-6">
-                      <button type="button" onClick={handleReset} className="btn btn-secondary btn-sm">
-                        <RefreshIcon className="size-4" />
-                        Track another order
-                      </button>
-                      <Link href="/pages/contact" className="btn btn-ghost btn-sm">
-                        Questions? Contact us
-                      </Link>
-                    </div>
-                  </>
-                )}
+                  <div className="flex flex-wrap gap-3 border-t border-paper-200 px-5 py-4 sm:px-6">
+                    <button type="button" onClick={handleReset} className="btn btn-secondary btn-sm">
+                      <RefreshIcon className="size-4" />
+                      Track another order
+                    </button>
+                    <Link href="/pages/contact" className="btn btn-ghost btn-sm">
+                      Questions? Contact us
+                    </Link>
+                  </div>
+                </>
               </div>
             ) : (
               <EmptyState

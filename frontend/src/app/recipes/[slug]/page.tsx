@@ -8,11 +8,11 @@ import { Reveal } from "@/components/ui/Reveal";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SmartImage } from "@/components/ui/SmartImage";
 import {
-  ArrowRightIcon,
   CheckIcon,
   ClockIcon,
   MapPinIcon,
   UtensilsIcon,
+  YoutubeIcon,
 } from "@/components/ui/icons";
 
 export const revalidate = 600;
@@ -49,7 +49,7 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ s
   return (
     <>
       {/* ============================ BREADCRUMBS + HERO ============================ */}
-      <section className="shell py-14 md:py-20">
+      <section className="shell py-6 md:py-8">
         <Breadcrumbs items={[{ label: "Recipes", href: "/recipes" }, { label: recipe.title }]} />
 
         <div className="group relative mt-6 overflow-hidden rounded-3xl md:rounded-4xl">
@@ -81,9 +81,8 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ s
             </p>
           </div>
         </div>
-
         {/* Meta strip */}
-        <ul className="panel mt-6 grid gap-x-6 gap-y-4 px-5 py-4 sm:grid-cols-3 sm:py-5">
+        <ul className="panel mt-4 grid gap-x-6 gap-y-4 px-5 py-4 sm:grid-cols-2 lg:grid-cols-3 sm:py-5">
           {meta.map((item) => (
             <li key={item.label} className="flex items-center gap-3">
               <span className="grid size-10 shrink-0 place-items-center rounded-xl bg-white text-masala-700 shadow-xs">
@@ -103,19 +102,18 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ s
       </section>
 
       {/* ============================ INGREDIENTS + METHOD ============================ */}
-      <section className="shell py-14 md:py-20">
+      <section className="shell py-6 md:py-8">
         <div className="grid gap-8 lg:grid-cols-[0.85fr_1.15fr] lg:gap-12">
           {/* Sidebar: ingredients + CTA */}
           <Reveal className="h-full">
-            <div className="lg:sticky lg:top-32">
-              <div className="panel p-6">
+            <div className="lg:sticky lg:top-28">
+              <div className="panel p-5">
                 <h2 className="font-display text-xl font-semibold text-ink-950">
                   Ingredients
                 </h2>
-                <p className="mt-1 text-sm text-ink-500">Tick them off as you go.</p>
 
                 {recipe.ingredients.length > 0 ? (
-                  <ul className="mt-5 space-y-3">
+                  <ul className="mt-4 space-y-3">
                     {recipe.ingredients.map((item) => (
                       <li
                         key={item}
@@ -138,23 +136,6 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ s
                 )}
               </div>
 
-              {/* Use this blend CTA */}
-              <div className="relative mt-5 overflow-hidden rounded-3xl bg-ink-950 p-6 text-paper-100">
-                <div className="grain absolute inset-0" aria-hidden="true" />
-                <div className="relative">
-                  <p className="eyebrow text-saffron-300">Use this blend</p>
-                  <h2 className="mt-2 font-display text-xl font-semibold text-paper-50">
-                    Cook it with our small-batch masalas
-                  </h2>
-                  <p className="mt-2 text-sm leading-relaxed text-paper-300">
-                    Roasted and ground the same week — the difference shows up in the pan.
-                  </p>
-                  <Link href="/collections/breakfast-masalas" className="btn btn-saffron mt-5">
-                    Shop the blends
-                    <ArrowRightIcon className="size-4" />
-                  </Link>
-                </div>
-              </div>
             </div>
           </Reveal>
 
@@ -167,16 +148,19 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ s
               </h2>
 
               {recipe.steps.length > 0 ? (
-                <ol className="mt-7 space-y-7">
+                <ol className="mt-5 space-y-4">
                   {recipe.steps.map((step, index) => (
-                    <li key={index} className="flex gap-4 md:gap-6">
+                    <li
+                      key={index}
+                      className="grid grid-cols-[2rem_minmax(0,1fr)] items-start gap-x-3"
+                    >
                       <span
                         aria-hidden="true"
-                        className="w-9 shrink-0 pt-1 font-display text-3xl leading-none font-semibold text-masala-700 md:w-12 md:text-4xl"
+                        className="mt-0.5 grid size-8 place-items-center rounded-full bg-saffron-100 font-sans text-xs font-bold leading-none text-masala-800"
                       >
                         {index + 1}
                       </span>
-                      <p className="text-[1.0625rem] leading-8 text-ink-700">{step}</p>
+                      <p className="min-w-0 flex-1 text-sm leading-6 text-ink-700">{step}</p>
                     </li>
                   ))}
                 </ol>
@@ -185,13 +169,25 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ s
                   The method for this recipe is being written up — check back shortly.
                 </p>
               )}
+
+              {recipe.video_url && /^https?:\/\//i.test(recipe.video_url) ? (
+                <a
+                  href={recipe.video_url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="mt-6 inline-flex items-center gap-2 rounded-xl border border-paper-200 bg-white px-4 py-3 text-sm font-semibold text-masala-800 transition-colors hover:border-masala-200 hover:bg-masala-50"
+                >
+                  <YoutubeIcon className="size-4" />
+                  Watch recipe video
+                </a>
+              ) : null}
             </div>
           </Reveal>
         </div>
       </section>
 
       {/* ============================ RELATED ============================ */}
-      <section className="bg-paper-100 py-14 md:py-20">
+      <section className="bg-paper-100 py-8 md:py-10">
         <div className="shell">
           <Reveal>
             <SectionHeading
@@ -211,27 +207,29 @@ export default async function RecipeDetailPage({ params }: { params: Promise<{ s
               />
             </div>
           ) : (
-            <div className="mt-8 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {related.map((item, index) => (
                 <Reveal key={item.slug} delay={index * 90} className="h-full">
                   <Link
                     href={`/recipes/${item.slug}`}
-                    className="group flex h-full flex-col overflow-hidden rounded-3xl border border-paper-200 bg-white transition-all duration-300 hover:-translate-y-1 hover:border-paper-300 hover:shadow-lg"
+                    className="group flex h-full flex-col overflow-hidden rounded-2xl border border-paper-200 bg-white transition-all duration-300 hover:-translate-y-1 hover:border-paper-300 hover:shadow-md"
                   >
                     <SmartImage
                       src={item.hero_image_url}
                       alt={item.title}
-                      aspect="aspect-video"
+                      aspect="aspect-[4/3]"
                       zoom
                       sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                     />
-                    <div className="flex flex-1 flex-col p-5">
-                      <p className="eyebrow">{item.cuisine}</p>
-                      <h3 className="mt-2.5 font-display text-xl leading-snug font-semibold text-ink-950 transition-colors group-hover:text-masala-800">
+                    <div className="flex flex-1 flex-col p-4">
+                      <p className="text-[0.62rem] font-semibold tracking-[0.14em] text-masala-600 uppercase">
+                        {item.cuisine}
+                      </p>
+                      <h3 className="mt-1.5 font-display text-base leading-snug font-semibold text-ink-950 transition-colors group-hover:text-masala-800">
                         {item.title}
                       </h3>
-                      <p className="mt-auto flex items-center gap-1.5 pt-4 text-sm text-ink-500">
-                        <ClockIcon className="size-4 shrink-0 text-masala-600" />
+                      <p className="mt-auto flex items-center gap-1.5 pt-3 text-xs text-ink-500">
+                        <ClockIcon className="size-3.5 shrink-0 text-masala-600" />
                         <span className="truncate">
                           {item.cook_time_minutes} mins · {item.dish_type}
                         </span>

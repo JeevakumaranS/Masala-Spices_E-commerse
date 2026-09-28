@@ -2,28 +2,24 @@
 
 from datetime import datetime
 from typing import Any, Literal
+from uuid import UUID
 
 from pydantic import BaseModel, Field, field_validator
 
 DeliveryMode = Literal["domestic", "international"]
+OrderStatusName = Literal["placed", "processing", "shipped", "delivered"]
 
 
 class OrderItemInput(BaseModel):
-    product_id: int = Field(gt=0)
-    variant_id: int | None = Field(default=None, ge=0)
+    product_id: UUID
+    variant_id: UUID | None = None
     qty: int = Field(ge=1, le=20)
-
-    @field_validator("variant_id", mode="before")
-    @classmethod
-    def normalize_zero_variant(cls, value: Any) -> Any:
-        # Older storefronts used 0 to mean "no selected variant".
-        return None if value == 0 else value
 
 
 class OrderCreateRequest(BaseModel):
     customer_name: str = Field(min_length=2, max_length=120)
     phone: str = Field(min_length=7, max_length=24)
-    email: str | None = Field(default=None, max_length=254)
+    email: str = Field(min_length=3, max_length=254)
     address_line: str = Field(min_length=6, max_length=300)
     city: str = Field(min_length=2, max_length=120)
     state: str | None = Field(default=None, max_length=120)
@@ -35,15 +31,11 @@ class OrderCreateRequest(BaseModel):
 
     @field_validator("email")
     @classmethod
-    def normalize_email(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
+    def normalize_email(cls, value: str) -> str:
         normalized = value.strip()
-        if not normalized:
-            return None
         local, separator, domain = normalized.partition("@")
         if not separator or not local or "." not in domain or domain.startswith(".") or domain.endswith("."):
-            raise ValueError("Enter a valid email address or leave it blank.")
+            raise ValueError("Enter a valid email address.")
         return normalized
 
     @field_validator("country_code", "coupon_code")
@@ -55,19 +47,20 @@ class OrderCreateRequest(BaseModel):
 
 
 class OrderStatusHistory(BaseModel):
-    id: int
-    status: str
+    id: UUID
+    status: OrderStatusName
     changed_at: datetime
     note: str | None = None
 
 
 class Order(BaseModel):
-    id: int
+    id: UUID
     order_number: str
     customer_name: str
     phone: str
     email: str | None = None
-    status: str = "placed"
+    email_confirmation_status: Literal["sent", "failed", "disabled"] | None = None
+    status: OrderStatusName = "placed"
     payment_status: str = "pending_offline"
     total: float
     subtotal: float
@@ -84,4 +77,6 @@ class Order(BaseModel):
     city: str | None = None
     state: str | None = None
     postal_code: str | None = None
+    tracking_id: str | None = None
+    courier_partner: str | None = None
     history: list[OrderStatusHistory] = Field(default_factory=list)

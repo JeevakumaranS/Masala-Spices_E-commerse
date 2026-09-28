@@ -13,8 +13,8 @@ import {
 export type CartLine = {
   /** Stable identity: product + selected variant. */
   key: string;
-  id: number;
-  variantId: number | null;
+  id: string;
+  variantId: string | null;
   name: string;
   slug: string;
   category: string;
@@ -52,7 +52,7 @@ type CartStore = {
 
 const MAX_PER_LINE = 20;
 
-const lineKey = (id: number, variantId: number | null) => `${id}:${variantId ?? "default"}`;
+const lineKey = (id: string, variantId: string | null) => `${id}:${variantId ?? "default"}`;
 
 export const useCartStore = create<CartStore>()(
   persist(
@@ -156,16 +156,13 @@ export const useCartStore = create<CartStore>()(
         deliveryMode: state.deliveryMode,
         destinationCountry: state.destinationCountry,
       }),
-      version: 4,
+      version: 5,
       migrate: (persistedState) => {
         const state = (persistedState ?? {}) as Partial<CartStore>;
         return {
-          lines: Array.isArray(state.lines) ? state.lines : [],
+          lines: [],
           promoCode: typeof state.promoCode === "string" ? state.promoCode : null,
-          promoDiscount:
-            typeof state.promoDiscount === "number" && Number.isFinite(state.promoDiscount)
-              ? Math.max(0, state.promoDiscount)
-              : null,
+          promoDiscount: null,
           promoLabel: typeof state.promoLabel === "string" ? state.promoLabel : null,
           deliveryMode: state.deliveryMode === "international" ? "international" : "domestic",
           destinationCountry:

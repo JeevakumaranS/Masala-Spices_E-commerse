@@ -3,18 +3,23 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Recipe } from "@/lib/types";
-import { cn } from "@/lib/cn";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Reveal } from "@/components/ui/Reveal";
 import { SmartImage } from "@/components/ui/SmartImage";
-import { ClockIcon, CloseIcon, LeafIcon } from "@/components/ui/icons";
+import {
+  ChevronDownIcon,
+  ClockIcon,
+  CloseIcon,
+  LeafIcon,
+  SearchIcon,
+} from "@/components/ui/icons";
 
 type TimeBucket = "u30" | "30-60" | "60+";
 
 const TIME_BUCKETS: { value: TimeBucket; label: string }[] = [
-  { value: "u30", label: "Under 30 mins" },
-  { value: "30-60", label: "30–60 mins" },
-  { value: "60+", label: "60+ mins" },
+  { value: "u30", label: "Under 30 minutes" },
+  { value: "30-60", label: "30–60 minutes" },
+  { value: "60+", label: "Over 60 minutes" },
 ];
 
 /** Filter options are derived from whatever the API actually returned. */
@@ -30,46 +35,35 @@ function inTimeBucket(minutes: number, bucket: TimeBucket): boolean {
   return minutes > 60;
 }
 
-function FilterChip({
-  label,
-  active,
+function FilterSelect({
+  value,
   onClick,
+  options,
+  placeholder,
+  ariaLabel,
 }: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
+  value: string;
+  onClick: (value: string) => void;
+  options: { value: string; label: string }[];
+  placeholder: string;
+  ariaLabel: string;
 }) {
   return (
-    <button
-      type="button"
-      aria-pressed={active}
-      onClick={onClick}
-      className={cn(
-        "rounded-full border px-3.5 py-1.5 text-xs font-semibold transition-colors duration-200",
-        "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-saffron-400",
-        active
-          ? "border-saffron-400 bg-saffron-400 text-ink-950"
-          : "border-white/15 bg-white/[0.07] text-paper-200 hover:border-saffron-400/50 hover:bg-white/[0.1] hover:text-saffron-200",
-      )}
-    >
-      {label}
-    </button>
-  );
-}
-
-function FilterRow({
-  label,
-  children,
-}: {
-  label: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="flex flex-wrap items-center gap-2">
-      <span className="mr-1 text-[0.68rem] font-bold tracking-[0.16em] text-paper-400 uppercase">
-        {label}
-      </span>
-      {children}
+    <div className="relative">
+      <select
+        value={value}
+        onChange={(event) => onClick(event.target.value)}
+        aria-label={ariaLabel}
+        className="h-10 w-full cursor-pointer appearance-none rounded-xl border border-paper-200 bg-white px-3 pr-9 text-sm font-medium text-ink-700 shadow-xs transition-colors hover:border-paper-300 focus:border-masala-400 focus:outline-none focus:ring-2 focus:ring-masala-100"
+      >
+        <option value="">{placeholder}</option>
+        {options.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+      <ChevronDownIcon className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-ink-400" />
     </div>
   );
 }
@@ -78,22 +72,24 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
   return (
     <Link
       href={`/recipes/${recipe.slug}`}
-      className="group flex h-full flex-col overflow-hidden rounded-3xl border border-paper-200 bg-white transition-all duration-300 hover:-translate-y-1 hover:border-paper-300 hover:shadow-lg"
+      className="group flex h-full flex-col overflow-hidden rounded-2xl border border-paper-200 bg-white transition-all duration-300 hover:-translate-y-1 hover:border-paper-300 hover:shadow-md"
     >
       <SmartImage
         src={recipe.hero_image_url}
         alt={recipe.title}
-        aspect="aspect-video"
+        aspect="aspect-[4/3]"
         zoom
         sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
       />
-      <div className="flex flex-1 flex-col p-5">
-        <p className="eyebrow">{recipe.cuisine}</p>
-        <h3 className="mt-2.5 font-display text-xl leading-snug font-semibold text-ink-950 transition-colors group-hover:text-masala-800">
+      <div className="flex flex-1 flex-col p-4">
+        <p className="text-[0.62rem] font-semibold tracking-[0.14em] text-masala-600 uppercase">
+          {recipe.cuisine}
+        </p>
+        <h3 className="mt-1.5 font-display text-base leading-snug font-semibold text-ink-950 transition-colors group-hover:text-masala-800">
           {recipe.title}
         </h3>
-        <p className="mt-auto flex items-center gap-1.5 pt-4 text-sm text-ink-500">
-          <ClockIcon className="size-4 shrink-0 text-masala-600" />
+        <p className="mt-auto flex items-center gap-1.5 pt-3 text-xs text-ink-500">
+          <ClockIcon className="size-3.5 shrink-0 text-masala-600" />
           <span className="truncate">
             {recipe.cook_time_minutes} mins · {recipe.dish_type}
           </span>
@@ -104,7 +100,7 @@ function RecipeCard({ recipe }: { recipe: Recipe }) {
 }
 
 /**
- * Client half of the recipes index: dark hero band with filter chips plus the
+ * Client half of the recipes index: search and filter controls plus the
  * recipe grid. Receives the (server-fetched) recipes as plain props.
  */
 export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
@@ -114,98 +110,101 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
   const [cuisine, setCuisine] = useState<string | null>(null);
   const [dishType, setDishType] = useState<string | null>(null);
   const [time, setTime] = useState<TimeBucket | null>(null);
+  const [search, setSearch] = useState("");
 
-  const hasFilters = cuisine !== null || dishType !== null || time !== null;
+  const hasFilters = cuisine !== null || dishType !== null || time !== null || search.trim() !== "";
 
   const clearFilters = () => {
     setCuisine(null);
     setDishType(null);
     setTime(null);
+    setSearch("");
   };
 
   const filtered = recipes.filter((recipe) => {
     if (cuisine !== null && recipe.cuisine !== cuisine) return false;
     if (dishType !== null && recipe.dish_type !== dishType) return false;
     if (time !== null && !inTimeBucket(recipe.cook_time_minutes, time)) return false;
+    const query = search.trim().toLocaleLowerCase();
+    if (
+      query &&
+      ![
+        recipe.title,
+        recipe.cuisine,
+        recipe.dish_type,
+        ...recipe.ingredients,
+      ]
+        .join(" ")
+        .toLocaleLowerCase()
+        .includes(query)
+    ) {
+      return false;
+    }
     return true;
   });
 
+  const timeOptions = TIME_BUCKETS.map(({ value, label }) => ({ value, label }));
+
   return (
     <>
-      {/* ============================ HERO + FILTERS ============================ */}
-      <section className="relative overflow-hidden bg-ink-950 py-14 md:py-20">
-        <div className="grain">
-          <div className="shell">
-            <p className="eyebrow text-saffron-300">Cook with confidence</p>
-            <h1 className="display mt-4 max-w-[15ch] text-paper-50">
-              Recipes that put the jar to work.
-            </h1>
-            <p className="lede mt-5 max-w-2xl text-paper-300">
-              Written for home cooks — measured in spoons, not scales, and timed for a
-              weeknight. Filter by cuisine, dish type, or how long you&apos;ve got.
-            </p>
-
-            {recipes.length > 0 ? (
-              <div className="mt-9 flex flex-col gap-3.5 border-t border-white/10 pt-7">
-                {cuisines.length > 1 ? (
-                  <FilterRow label="Cuisine">
-                    <FilterChip
-                      label="All"
-                      active={cuisine === null}
-                      onClick={() => setCuisine(null)}
-                    />
-                    {cuisines.map((value) => (
-                      <FilterChip
-                        key={value}
-                        label={value}
-                        active={cuisine === value}
-                        onClick={() => setCuisine(cuisine === value ? null : value)}
-                      />
-                    ))}
-                  </FilterRow>
-                ) : null}
-
-                {dishTypes.length > 1 ? (
-                  <FilterRow label="Dish type">
-                    <FilterChip
-                      label="All"
-                      active={dishType === null}
-                      onClick={() => setDishType(null)}
-                    />
-                    {dishTypes.map((value) => (
-                      <FilterChip
-                        key={value}
-                        label={value}
-                        active={dishType === value}
-                        onClick={() => setDishType(dishType === value ? null : value)}
-                      />
-                    ))}
-                  </FilterRow>
-                ) : null}
-
-                <FilterRow label="Cook time">
-                  <FilterChip
-                    label="Any"
-                    active={time === null}
-                    onClick={() => setTime(null)}
-                  />
-                  {TIME_BUCKETS.map((bucket) => (
-                    <FilterChip
-                      key={bucket.value}
-                      label={bucket.label}
-                      active={time === bucket.value}
-                      onClick={() => setTime(time === bucket.value ? null : bucket.value)}
-                    />
-                  ))}
-                </FilterRow>
-              </div>
-            ) : null}
-          </div>
+      <section className="border-b border-paper-200 bg-paper-100 py-6 md:py-8">
+        <div className="shell">
+          <h1 className="font-display text-2xl font-bold text-ink-950 md:text-3xl">
+            Find a recipe
+          </h1>
+          {recipes.length > 0 ? (
+            <div className="mt-4 grid grid-cols-2 gap-1.5 sm:grid-cols-4 lg:grid-cols-5">
+              <label className="relative col-span-2 sm:col-span-2 lg:col-span-1">
+                <SearchIcon className="pointer-events-none absolute top-1/2 left-3 size-3.5 -translate-y-1/2 text-ink-400" />
+                <input
+                  type="search"
+                  value={search}
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="Search recipes"
+                  aria-label="Search recipes and ingredients"
+                  className="h-10 w-full rounded-xl border border-paper-200 bg-white pr-3 pl-9 text-sm text-ink-900 shadow-xs placeholder:text-ink-400 focus:border-masala-400 focus:outline-none focus:ring-2 focus:ring-masala-100"
+                />
+              </label>
+              <FilterSelect
+                value={cuisine ?? ""}
+                onClick={(value) => setCuisine(value || null)}
+                options={cuisines.map((value) => ({ value, label: value }))}
+                placeholder="All cuisines"
+                ariaLabel="Filter by cuisine"
+              />
+              <FilterSelect
+                value={dishType ?? ""}
+                onClick={(value) => setDishType(value || null)}
+                options={dishTypes.map((value) => ({ value, label: value }))}
+                placeholder="All dish types"
+                ariaLabel="Filter by dish type"
+              />
+              <FilterSelect
+                value={time ?? ""}
+                onClick={(value) =>
+                  setTime(TIME_BUCKETS.find((bucket) => bucket.value === value)?.value ?? null)
+                }
+                options={timeOptions}
+                placeholder="Any cook time"
+                ariaLabel="Filter by cooking time"
+              />
+              {hasFilters ? (
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-xl border border-paper-200 bg-white px-3 text-sm font-semibold text-masala-700 transition-colors hover:border-masala-200 hover:bg-masala-50"
+                >
+                  <CloseIcon className="size-4" />
+                  Clear filters
+                </button>
+              ) : null}
+            </div>
+          ) : null}
         </div>
       </section>
 
       {/* ============================ GRID ============================ */}
-      <section className="shell py-14 md:py-20">
+      <section className="shell py-6 md:py-8">
         {recipes.length === 0 ? (
           <EmptyState
             icon={<LeafIcon className="size-7" />}
@@ -217,15 +216,19 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
         ) : (
           <>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <p role="status" className="text-sm text-ink-500">
+              <p role="status" className="text-xs text-ink-500">
                 Showing{" "}
                 <span className="font-semibold text-ink-900">{filtered.length}</span> of{" "}
                 {recipes.length} recipes
               </p>
               {hasFilters && filtered.length > 0 ? (
-                <button type="button" className="btn btn-secondary btn-sm" onClick={clearFilters}>
-                  <CloseIcon className="size-3.5" />
-                  Clear filters
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="flex items-center gap-1 text-xs font-medium text-masala-700 transition-colors hover:text-masala-900"
+                >
+                  <CloseIcon className="size-3" />
+                  Clear
                 </button>
               ) : null}
             </div>
@@ -238,13 +241,17 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
                   title="Nothing fits those filters"
                   description="Try a different cuisine or cook time — or clear the filters to see every recipe again."
                 />
-                <button type="button" className="btn btn-primary mt-5" onClick={clearFilters}>
-                  <CloseIcon className="size-4" />
+                <button
+                  type="button"
+                  onClick={clearFilters}
+                  className="mt-4 flex items-center gap-1.5 text-xs font-medium text-masala-700 transition-colors hover:text-masala-900"
+                >
+                  <CloseIcon className="size-3.5" />
                   Clear filters
                 </button>
               </div>
             ) : (
-              <div className="mt-6 grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
+              <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
                 {filtered.map((recipe, index) => (
                   <Reveal key={recipe.slug} delay={(index % 3) * 80} className="h-full">
                     <RecipeCard recipe={recipe} />

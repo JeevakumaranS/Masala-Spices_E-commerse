@@ -123,7 +123,7 @@ set `aria-invalid`, and render `.field-error` for messages.
   configurable starter international destination matrix used for instant estimates.
   The backend coupon and order endpoints recalculate all discounts and shipping
   authoritatively.
-- Order confirmation email/SMS/WhatsApp notifications are intentionally deferred.
+- Order confirmation email and SMS notifications use Brevo and Twilio when configured; WhatsApp notifications are not integrated.
   Checkout displays the order reference and routes payment confirmation through the
   admin by phone.
 - `store/ui.ts` — `useUIStore` for search/cart/mobile-nav open state and `showToast(text, tone?, action?)`.

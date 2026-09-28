@@ -2,23 +2,26 @@
 
 from datetime import date, datetime, timezone
 from decimal import Decimal
-import hmac
-import os
+from ipaddress import ip_address
+import re
 from typing import Any, Literal
+from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import delete, insert, select, update
+from sqlalchemy import delete, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import (
-    admin_registration_state_table,
+    admin_integration_settings_table,
     admin_users_table,
     categories_table,
     coupons_table,
     get_db,
+    order_history_table,
+    order_items_table,
     orders_table,
     products_table,
     reviews_table,
@@ -26,6 +29,12 @@ from app.core.database import (
 )
 from app.modules.admin.auth import bearer, hash_password, issue_token, require_admin, verify_password
 from app.modules.admin.schemas import LoginRequest, RegisterAdminRequest
+from app.modules.notifications.brevo import send_order_status_email
+from app.modules.notifications.crypto import (
+    InvalidToken,
+    decrypt_integration_secret,
+    integration_settings_cipher,
+)
 from app.modules.orders.catalog import CatalogValidationError, quote_order_items
 from app.modules.orders.schemas import OrderItemInput
 from app.modules.orders.shipping import calculate_shipping
@@ -35,7 +44,7 @@ router = APIRouter(prefix="/api/admin", tags=["admin"])
 
 
 class VariantInput(BaseModel):
-    id: int | None = None
+    id: UUID | None = None
     pack_size: str = Field(min_length=1, max_length=32)
     price: Decimal = Field(ge=0)
     mrp: Decimal = Field(ge=0)
@@ -56,7 +65,7 @@ class ProductInput(BaseModel):
     spice_level: str = "mild"
     status: str = "active"
     variants: list[VariantInput] = Field(default_factory=list)
-    images: list[dict[str, Any]] = Field(default_factory=list)
+    images: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     dish_type: str | None = None
     is_veg: bool = True
@@ -69,25 +78,22 @@ class CategoryInput(BaseModel):
     slug: str = Field(min_length=1, max_length=255)
     type: str = "product_type"
     description: str | None = None
-    parent_id: int | None = None
+    parent_id: UUID | None = None
     seo_title: str | None = None
     seo_description: str | None = None
 
 
 class OrderLineAdjustment(BaseModel):
-    product_id: int = Field(gt=0)
-    variant_id: int | None = Field(default=None, ge=0)
+    product_id: UUID
+    variant_id: UUID | None = None
     qty: int = Field(ge=1, le=20)
     price: Decimal | None = Field(default=None, ge=0)
 
-    @field_validator("variant_id", mode="before")
-    @classmethod
-    def normalize_no_variant(cls, value: Any) -> Any:
-        return None if value == 0 else value
-
 
 class OrderReviewInput(BaseModel):
-    status: Literal["placed", "under_review", "confirmed", "shipped"]
+    status: Literal["placed", "processing", "shipped", "delivered"]
+    tracking_id: str | None = Field(default=None, max_length=128)
+    courier_partner: str | None = Field(default=None, max_length=120)
     note: str | None = Field(default=None, max_length=2000)
     admin_note: str | None = Field(default=None, max_length=2000)
     payment_note: str | None = Field(default=None, max_length=2000)
@@ -149,6 +155,83 @@ class ReviewStatusInput(BaseModel):
     status: Literal["approved", "rejected", "pending"]
 
 
+class AdminIntegrationSettingsInput(BaseModel):
+    sms_enabled: bool | None = None
+    email_enabled: bool | None = None
+    sms_api_key: str | None = Field(default=None, min_length=1, max_length=4096)
+    sms_account_sid: str | None = Field(default=None, min_length=1, max_length=64)
+    sms_sender_phone: str | None = Field(default=None, max_length=32)
+    email_api_key: str | None = Field(default=None, min_length=1, max_length=4096)
+    email_sender_name: str | None = Field(default=None, max_length=120)
+    email_sender_email: str | None = Field(default=None, max_length=254)
+    clear_sms_api_key: bool = False
+    clear_email_api_key: bool = False
+
+    @field_validator("sms_api_key", "email_api_key")
+    @classmethod
+    def normalize_api_key(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip()
+        if not normalized:
+            raise ValueError("API keys cannot be blank.")
+        return normalized
+
+    @model_validator(mode="after")
+    def validate_key_actions(self) -> "AdminIntegrationSettingsInput":
+        if self.sms_api_key is not None and self.clear_sms_api_key:
+            raise ValueError("Provide an SMS API key or clear it, not both.")
+        if self.email_api_key is not None and self.clear_email_api_key:
+            raise ValueError("Provide an email API key or clear it, not both.")
+        return self
+
+    @field_validator("email_sender_name", "email_sender_email")
+    @classmethod
+    def normalize_sender_fields(cls, value: str | None) -> str | None:
+        return value.strip() if value is not None else None
+
+    @field_validator("email_sender_email")
+    @classmethod
+    def validate_sender_email(cls, value: str | None) -> str | None:
+        if value and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+            raise ValueError("Enter a valid verified Brevo sender email.")
+        return value
+
+    @field_validator("sms_account_sid")
+    @classmethod
+    def validate_twilio_account_sid(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value is not None else None
+        if normalized and not re.fullmatch(r"AC[0-9a-fA-F]{32}", normalized):
+            raise ValueError("Enter a valid Twilio Account SID beginning with AC.")
+        return normalized
+
+    @field_validator("sms_sender_phone")
+    @classmethod
+    def validate_twilio_sender_phone(cls, value: str | None) -> str | None:
+        normalized = value.strip() if value is not None else None
+        if normalized and not re.fullmatch(r"\+[1-9]\d{7,14}", normalized):
+            raise ValueError("Enter a Twilio sender phone number in E.164 format, such as +14155550123.")
+        return normalized
+
+
+class RevealIntegrationKeyInput(BaseModel):
+    channel: Literal["sms", "email"]
+
+
+def _integration_settings_response(row: Any) -> dict[str, Any]:
+    return {
+        "sms_enabled": bool(row["sms_enabled"]),
+        "email_enabled": bool(row["email_enabled"]),
+        "sms_api_key_configured": bool(
+            row["sms_api_key_encrypted"]
+            and row["sms_account_sid_encrypted"]
+        ),
+        "email_api_key_configured": bool(row["email_api_key_encrypted"]),
+        "email_sender_name": row["email_sender_name"] or "",
+        "email_sender_email": row["email_sender_email"] or "",
+    }
+
+
 @router.post("/login")
 async def admin_login(
     payload: LoginRequest,
@@ -168,61 +251,198 @@ async def admin_login(
 
 @router.get("/registration-status")
 async def admin_registration_status(db: AsyncSession = Depends(get_db)) -> dict[str, bool]:
-    state_result = await db.execute(
-        select(admin_registration_state_table.c.bootstrap_complete).where(
-            admin_registration_state_table.c.id == 1
-        )
-    )
-    bootstrap_complete = state_result.scalar_one_or_none()
-    if bootstrap_complete is None:
-        raise HTTPException(status_code=503, detail="Admin registration state is not initialized.")
     count_result = await db.execute(select(admin_users_table.c.id))
     admins_exist = count_result.first() is not None
-    return {
-        "admins_exist": admins_exist,
-        "bootstrap_enabled": not bootstrap_complete and not admins_exist and bool(
-            os.getenv("ADMIN_BOOTSTRAP_SECRET")
-        ),
-    }
+    return {"admins_exist": admins_exist}
+
+
+@router.get("/integration-settings", dependencies=[Depends(require_admin)])
+async def get_admin_integration_settings(
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(
+        select(admin_integration_settings_table).limit(1)
+    )
+    row = result.mappings().first()
+    if row is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Integration settings are not initialized. Apply the latest database migration.",
+        )
+    return _integration_settings_response(row)
+
+
+@router.post("/integration-settings/reveal", dependencies=[Depends(require_admin)])
+async def reveal_admin_integration_key(
+    payload: RevealIntegrationKeyInput,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, str]:
+    result = await db.execute(
+        select(admin_integration_settings_table).limit(1)
+    )
+    settings = result.mappings().first()
+    if settings is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Integration settings are not initialized. Apply the latest database migration.",
+        )
+
+    encrypted_key = settings[f"{payload.channel}_api_key_encrypted"]
+    if not encrypted_key:
+        raise HTTPException(status_code=404, detail="No API key is configured for this integration.")
+    try:
+        api_key = decrypt_integration_secret(encrypted_key)
+        if payload.channel == "sms":
+            encrypted_account_sid = settings["sms_account_sid_encrypted"]
+            if not encrypted_account_sid:
+                raise HTTPException(
+                    status_code=404,
+                    detail="Twilio account details are not fully configured.",
+                )
+            account_sid = decrypt_integration_secret(encrypted_account_sid)
+    except (InvalidToken, UnicodeError) as exc:
+        raise HTTPException(
+            status_code=503,
+            detail="The saved API key could not be decrypted. Check that ADMIN_TOKEN_SECRET has not changed.",
+        ) from exc
+
+    response.headers["Cache-Control"] = "no-store, private"
+    response.headers["Pragma"] = "no-cache"
+    if payload.channel == "sms":
+        return {
+            "account_sid": account_sid,
+            "api_key": api_key,
+            "sender_phone": settings["sms_sender_phone"] or "",
+        }
+    return {"api_key": api_key}
+
+
+@router.put("/integration-settings", dependencies=[Depends(require_admin)])
+async def update_admin_integration_settings(
+    payload: AdminIntegrationSettingsInput,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for field in ("sms_enabled", "email_enabled"):
+        value = getattr(payload, field)
+        if value is not None:
+            values[field] = value
+
+    if (
+        payload.sms_api_key is not None
+        or payload.sms_account_sid is not None
+        or payload.email_api_key is not None
+    ):
+        cipher = integration_settings_cipher()
+        if payload.sms_api_key is not None:
+            values["sms_api_key_encrypted"] = cipher.encrypt(
+                payload.sms_api_key.encode("utf-8")
+            ).decode("ascii")
+        if payload.sms_account_sid is not None:
+            values["sms_account_sid_encrypted"] = cipher.encrypt(
+                payload.sms_account_sid.encode("utf-8")
+            ).decode("ascii")
+        if payload.email_api_key is not None:
+            values["email_api_key_encrypted"] = cipher.encrypt(
+                payload.email_api_key.encode("utf-8")
+            ).decode("ascii")
+    if payload.clear_sms_api_key:
+        values["sms_api_key_encrypted"] = None
+        values["sms_account_sid_encrypted"] = None
+        values["sms_sender_phone"] = None
+    if payload.clear_email_api_key:
+        values["email_api_key_encrypted"] = None
+    if "sms_sender_phone" in payload.model_fields_set and not payload.clear_sms_api_key:
+        values["sms_sender_phone"] = payload.sms_sender_phone or None
+    for field in ("email_sender_name", "email_sender_email"):
+        if field in payload.model_fields_set:
+            values[field] = getattr(payload, field) or None
+    values["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
+
+    result = await db.execute(
+        select(admin_integration_settings_table)
+        .limit(1)
+        .with_for_update()
+    )
+    row = result.mappings().first()
+    if row is None:
+        raise HTTPException(
+            status_code=503,
+            detail="Integration settings are not initialized. Apply the latest database migration.",
+        )
+    effective_api_key = values.get("email_api_key_encrypted") or (
+        None if payload.clear_email_api_key else row["email_api_key_encrypted"]
+    )
+    effective_sender_name = values.get("email_sender_name", row["email_sender_name"])
+    effective_sender_email = values.get("email_sender_email", row["email_sender_email"])
+    effective_email_enabled = values.get("email_enabled", row["email_enabled"])
+    effective_sms_credentials = (
+        values.get("sms_api_key_encrypted")
+        or (None if payload.clear_sms_api_key else row["sms_api_key_encrypted"]),
+        values.get("sms_account_sid_encrypted")
+        or (None if payload.clear_sms_api_key else row["sms_account_sid_encrypted"]),
+        values.get("sms_sender_phone")
+        or (None if payload.clear_sms_api_key else row["sms_sender_phone"]),
+    )
+    effective_sms_enabled = values.get("sms_enabled", row["sms_enabled"])
+    if effective_sms_enabled and not all(effective_sms_credentials):
+        raise HTTPException(
+            status_code=422,
+            detail="Configure the Twilio Account SID, Auth Token, and sender phone before enabling SMS.",
+        )
+    if effective_email_enabled and not all(
+        (effective_api_key, effective_sender_name, effective_sender_email)
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="Configure the Brevo API key, sender name, and verified sender email before enabling email.",
+        )
+    await db.execute(
+        update(admin_integration_settings_table)
+        .where(admin_integration_settings_table.c.id == row["id"])
+        .values(**values)
+    )
+    updated = await db.execute(
+        select(admin_integration_settings_table).where(
+            admin_integration_settings_table.c.id == row["id"]
+        )
+    )
+    updated_row = updated.mappings().one()
+    await db.commit()
+    return _integration_settings_response(updated_row)
 
 
 @router.post("/register", status_code=201)
 async def register_admin(
     payload: RegisterAdminRequest,
+    request: Request,
     credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    bootstrap_registration = credentials is None
-    bootstrap_secret = os.getenv("ADMIN_BOOTSTRAP_SECRET", "")
+    first_admin_registration = credentials is None
+    try:
+        is_loopback_request = request.client is not None and ip_address(
+            request.client.host
+        ).is_loopback
+    except ValueError:
+        is_loopback_request = False
+    if first_admin_registration and not is_loopback_request:
+        raise HTTPException(
+            status_code=403,
+            detail="First-admin registration is available only from this computer.",
+        )
+
     try:
         async with db.begin():
-            state_result = await db.execute(
-                select(admin_registration_state_table)
-                .where(admin_registration_state_table.c.id == 1)
-                .with_for_update()
-            )
-            state = state_result.mappings().first()
-            if state is None:
-                raise HTTPException(
-                    status_code=503,
-                    detail="Admin registration state is not initialized.",
-                )
-            if bootstrap_registration:
+            if first_admin_registration:
+                await db.execute(text("SELECT pg_advisory_xact_lock(741928361)"))
                 admin_result = await db.execute(select(admin_users_table.c.id).limit(1))
-                if state["bootstrap_complete"] or admin_result.first() is not None:
+                if admin_result.first() is not None:
                     raise HTTPException(
                         status_code=403,
-                        detail="Bootstrap registration is closed; sign in as an admin to register another account.",
+                        detail="First-admin registration is closed; sign in as an admin to register another account.",
                     )
-                if not bootstrap_secret:
-                    raise HTTPException(
-                        status_code=503,
-                        detail="The first-admin bootstrap secret is not configured.",
-                    )
-                if not payload.bootstrap_secret or not hmac.compare_digest(
-                    payload.bootstrap_secret, bootstrap_secret
-                ):
-                    raise HTTPException(status_code=401, detail="Invalid bootstrap secret.")
             else:
                 await require_admin(credentials, db)
 
@@ -237,12 +457,6 @@ async def register_admin(
                 .returning(admin_users_table.c.id, admin_users_table.c.email)
             )
             admin = inserted.mappings().one()
-            if bootstrap_registration:
-                await db.execute(
-                    update(admin_registration_state_table)
-                    .where(admin_registration_state_table.c.id == 1)
-                    .values(bootstrap_complete=True)
-                )
     except IntegrityError as exc:
         await db.rollback()
         raise HTTPException(status_code=409, detail="An admin account with that email already exists.") from exc
@@ -252,7 +466,7 @@ async def register_admin(
         "email": admin["email"],
         "role": "admin",
     }
-    if bootstrap_registration:
+    if first_admin_registration:
         response.update({
             "access_token": issue_token(admin["email"]),
             "token_type": "bearer",
@@ -308,8 +522,12 @@ def _coupon_response(row: Any) -> dict[str, Any]:
     return coupon
 
 
-def _order_line_key(item: dict[str, Any]) -> tuple[int, int | None]:
-    return int(item["product_id"]), int(item["variant_id"]) if item.get("variant_id") is not None else None
+def _order_line_key(item: dict[str, Any]) -> tuple[str, str | None]:
+    return str(item["product_id"]), str(item["variant_id"]) if item.get("variant_id") is not None else None
+
+
+def _adjustment_line_key(item: OrderLineAdjustment) -> tuple[str, str | None]:
+    return str(item.product_id), str(item.variant_id) if item.variant_id is not None else None
 
 
 async def _rebuild_order_items(
@@ -320,9 +538,9 @@ async def _rebuild_order_items(
     if not adjustments:
         raise HTTPException(status_code=422, detail="An order must contain at least one item.")
 
-    seen: set[tuple[int, int | None]] = set()
+    seen: set[tuple[str, str | None]] = set()
     for adjustment in adjustments:
-        key = (adjustment.product_id, adjustment.variant_id)
+        key = _adjustment_line_key(adjustment)
         if key in seen:
             raise HTTPException(status_code=422, detail="An order line item may only be included once.")
         seen.add(key)
@@ -331,7 +549,7 @@ async def _rebuild_order_items(
     new_adjustments = [
         adjustment
         for adjustment in adjustments
-        if (adjustment.product_id, adjustment.variant_id) not in existing
+        if _adjustment_line_key(adjustment) not in existing
     ]
     quotes_by_key = {}
     if new_adjustments:
@@ -355,7 +573,7 @@ async def _rebuild_order_items(
     adjusted: list[dict[str, Any]] = []
     subtotal = Decimal("0")
     for adjustment in adjustments:
-        key = (adjustment.product_id, adjustment.variant_id)
+        key = _adjustment_line_key(adjustment)
         previous = existing.get(key)
         if previous is None:
             quote = quotes_by_key[key]
@@ -390,16 +608,16 @@ async def _rebuild_order_items(
             )
             line = dict(previous)
         line.update({
-            "qty": quote.qty,
+            "qty": adjustment.qty,
             "price": float(price),
-            "line_total": float(price * quote.qty),
+            "line_total": float(price * adjustment.qty),
         })
         adjusted.append(line)
-        subtotal += price * quote.qty
+        subtotal += price * adjustment.qty
     return adjusted, subtotal
 
 
-async def _replace_variants(db: AsyncSession, product_id: int, variants: list[VariantInput]) -> None:
+async def _replace_variants(db: AsyncSession, product_id: UUID, variants: list[VariantInput]) -> None:
     ids = {v.id for v in variants if v.id is not None}
     if ids:
         existing = await db.execute(
@@ -434,19 +652,19 @@ async def _unique_error(db: AsyncSession, exc: IntegrityError) -> None:
 async def admin_products(
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    result = await db.execute(select(products_table).order_by(products_table.c.id))
+    result = await db.execute(select(products_table).order_by(products_table.c.name))
     return await hydrate_products(db, [dict(row) for row in result.mappings()])
 
 
 @router.post("/products", status_code=201, dependencies=[Depends(require_admin)])
 async def create_product(payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     try:
-        async with db.begin():
-            values = _dump_product(payload)
-            values["created_at"] = datetime.now()
-            values["updated_at"] = datetime.now()
-            product_id = (await db.execute(insert(products_table).values(**values).returning(products_table.c.id))).scalar_one()
-            await _replace_variants(db, product_id, payload.variants)
+        values = _dump_product(payload)
+        values["created_at"] = datetime.now()
+        values["updated_at"] = datetime.now()
+        product_id = (await db.execute(insert(products_table).values(**values).returning(products_table.c.id))).scalar_one()
+        await _replace_variants(db, product_id, payload.variants)
+        await db.commit()
     except IntegrityError as exc:
         await _unique_error(db, exc)
     result = await db.execute(select(products_table).where(products_table.c.id == product_id))
@@ -454,16 +672,16 @@ async def create_product(payload: ProductInput, db: AsyncSession = Depends(get_d
 
 
 @router.put("/products/{product_id}", dependencies=[Depends(require_admin)])
-async def update_product(product_id: int, payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def update_product(product_id: UUID, payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     try:
-        async with db.begin():
-            exists = await db.execute(select(products_table.c.id).where(products_table.c.id == product_id))
-            if exists.scalar_one_or_none() is None:
-                raise HTTPException(status_code=404, detail="Product not found.")
-            values = _dump_product(payload)
-            values["updated_at"] = datetime.now()
-            await db.execute(update(products_table).where(products_table.c.id == product_id).values(**values))
-            await _replace_variants(db, product_id, payload.variants)
+        exists = await db.execute(select(products_table.c.id).where(products_table.c.id == product_id))
+        if exists.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Product not found.")
+        values = _dump_product(payload)
+        values["updated_at"] = datetime.now()
+        await db.execute(update(products_table).where(products_table.c.id == product_id).values(**values))
+        await _replace_variants(db, product_id, payload.variants)
+        await db.commit()
     except IntegrityError as exc:
         await _unique_error(db, exc)
     result = await db.execute(select(products_table).where(products_table.c.id == product_id))
@@ -471,7 +689,7 @@ async def update_product(product_id: int, payload: ProductInput, db: AsyncSessio
 
 
 @router.delete("/products/{product_id}", status_code=204, dependencies=[Depends(require_admin)])
-async def delete_product(product_id: int, db: AsyncSession = Depends(get_db)) -> None:
+async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
     result = await db.execute(delete(products_table).where(products_table.c.id == product_id))
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Product not found.")
@@ -480,7 +698,7 @@ async def delete_product(product_id: int, db: AsyncSession = Depends(get_db)) ->
 
 @router.get("/categories", dependencies=[Depends(require_admin)])
 async def admin_categories(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
-    result = await db.execute(select(categories_table).order_by(categories_table.c.id))
+    result = await db.execute(select(categories_table).order_by(categories_table.c.name))
     return [dict(row) for row in result.mappings()]
 
 
@@ -495,7 +713,7 @@ async def create_category(payload: CategoryInput, db: AsyncSession = Depends(get
 
 
 @router.put("/categories/{category_id}", dependencies=[Depends(require_admin)])
-async def update_category(category_id: int, payload: CategoryInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def update_category(category_id: UUID, payload: CategoryInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     try:
         await db.execute(update(categories_table).where(categories_table.c.id == category_id).values(**payload.model_dump()))
         await db.commit()
@@ -509,7 +727,7 @@ async def update_category(category_id: int, payload: CategoryInput, db: AsyncSes
 
 
 @router.delete("/categories/{category_id}", status_code=204, dependencies=[Depends(require_admin)])
-async def delete_category(category_id: int, db: AsyncSession = Depends(get_db)) -> None:
+async def delete_category(category_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
     result = await db.execute(delete(categories_table).where(categories_table.c.id == category_id))
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Category not found.")
@@ -527,41 +745,67 @@ async def admin_orders(
     if status:
         statement = statement.where(orders_table.c.status == status)
     result = await db.execute(statement)
-    return [dict(row["order_data"]) for row in result.mappings()]
+    orders = []
+    for row in result.mappings():
+        order = dict(row)
+        # Load items
+        items_result = await db.execute(
+            select(order_items_table).where(order_items_table.c.order_id == order["id"])
+        )
+        order["items"] = [dict(item) for item in items_result.mappings()]
+        # Load history
+        history_result = await db.execute(
+            select(order_history_table)
+            .where(order_history_table.c.order_id == order["id"])
+            .order_by(order_history_table.c.changed_at)
+        )
+        order["history"] = [dict(event) for event in history_result.mappings()]
+        orders.append(order)
+    return orders
 
 
 @router.put("/orders/{order_id}", dependencies=[Depends(require_admin)])
 @router.patch("/orders/{order_id}", dependencies=[Depends(require_admin)])
-async def review_order(order_id: int, payload: OrderReviewInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def review_order(order_id: UUID, payload: OrderReviewInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     allowed = {
-        "placed": {"under_review"},
-        "under_review": {"confirmed"},
-        "confirmed": {"shipped"},
-        "shipped": set(),
+        "placed": {"processing"},
+        "processing": {"shipped"},
+        "shipped": {"delivered"},
+        "delivered": set(),
     }
+    # The admin-auth dependency has already queried with this shared session.
+    await db.commit()
     async with db.begin():
         result = await db.execute(select(orders_table).where(orders_table.c.id == order_id).with_for_update())
         row = result.mappings().first()
         if row is None:
             raise HTTPException(status_code=404, detail="Order not found.")
-        order = dict(row["order_data"])
+        order = dict(row)
         current = str(order["status"])
         if payload.status != current and payload.status not in allowed.get(current, set()):
             raise HTTPException(status_code=409, detail=f"Invalid order transition: {current} to {payload.status}.")
-        if current == "under_review" and payload.status == "confirmed":
-            contact_note = (payload.admin_note or payload.note or "").strip()
-            payment_note = (payload.payment_note or "").strip()
-            if not contact_note:
+        if current == "processing" and payload.status == "shipped":
+            tracking_id = (payload.tracking_id or "").strip()
+            courier_partner = (payload.courier_partner or "").strip()
+            if not tracking_id or not courier_partner:
                 raise HTTPException(
                     status_code=422,
-                    detail="Record the customer contact outcome before confirming this order.",
+                    detail="Enter both the shipment tracking ID and courier partner before shipping this order.",
                 )
-            if order.get("payment_status") == "pending_offline" and not payment_note:
-                raise HTTPException(
-                    status_code=422,
-                    detail="Record the offline payment arrangement before confirming this order.",
-                )
+            order["tracking_id"] = tracking_id
+            order["courier_partner"] = courier_partner
+        elif payload.tracking_id is not None:
+            order["tracking_id"] = payload.tracking_id.strip() or order.get("tracking_id")
+        if payload.courier_partner is not None:
+            order["courier_partner"] = payload.courier_partner.strip() or order.get("courier_partner")
         if payload.items is not None:
+            # Load existing items
+            items_result = await db.execute(
+                select(order_items_table).where(order_items_table.c.order_id == order_id)
+            )
+            existing_items = [dict(item) for item in items_result.mappings()]
+            order["items"] = existing_items
+
             adjusted, subtotal = await _rebuild_order_items(db, order, payload.items)
             order["items"] = adjusted
             order["item_count"] = sum(item["qty"] for item in adjusted)
@@ -582,15 +826,47 @@ async def review_order(order_id: int, payload: OrderReviewInput, db: AsyncSessio
                 raise HTTPException(status_code=422, detail=str(exc)) from exc
             order["shipping_amount"] = float(shipping)
             order["total"] = float(discounted_subtotal + shipping)
+
+            # Replace order items in database
+            await db.execute(delete(order_items_table).where(order_items_table.c.order_id == order_id))
+            for item in adjusted:
+                await db.execute(insert(order_items_table).values(
+                    order_id=order_id,
+                    product_id=item.get("product_id"),
+                    variant_id=item.get("variant_id"),
+                    name=item.get("name"),
+                    pack_size=item.get("pack_size"),
+                    sku=item.get("sku"),
+                    dish_type=item.get("dish_type"),
+                    categories=item.get("categories", []),
+                    price=item["price"],
+                    qty=item["qty"],
+                    line_total=item["line_total"],
+                ))
+
         previous = order["status"]
         order["status"] = payload.status
-        history = order.setdefault("history", [])
-        history.append({
-            "id": max((int(event.get("id", 0)) for event in history), default=0) + 1,
+
+        # Add history entry
+        history_entry = {
+            "id": str(uuid4()),
             "status": payload.status,
             "changed_at": datetime.now(timezone.utc).isoformat(),
-            "note": payload.note or (f"Status changed from {previous} to {payload.status}." if previous != payload.status else "Order details updated."),
-        })
+            "note": payload.note or (
+                f"Shipped with {order['courier_partner']} (tracking ID: {order['tracking_id']})."
+                if previous == "processing" and payload.status == "shipped"
+                else f"Status changed from {previous} to {payload.status}."
+                if previous != payload.status
+                else "Order details updated."
+            ),
+        }
+        await db.execute(insert(order_history_table).values(
+            order_id=order_id,
+            status=payload.status,
+            changed_at=datetime.now(timezone.utc),
+            note=history_entry["note"],
+        ))
+
         note = payload.note if payload.note is not None else payload.admin_note
         if payload.admin_note is not None:
             order["admin_note"] = payload.admin_note
@@ -600,19 +876,40 @@ async def review_order(order_id: int, payload: OrderReviewInput, db: AsyncSessio
             order["payment_note"] = note
         if note:
             order["admin_note"] = note
-            order.setdefault("admin_notes", []).append({
-                "note": note,
-                "created_at": datetime.now(timezone.utc).isoformat(),
-            })
+
         await db.execute(update(orders_table).where(orders_table.c.id == order_id).values(
-            status=payload.status, total=order["total"], order_data=order
+            status=payload.status,
+            total=order["total"],
+            subtotal=order.get("subtotal", 0),
+            shipping_amount=order.get("shipping_amount", 0),
+            discount_amount=order.get("discount_amount", 0),
+            item_count=order.get("item_count", 0),
+            admin_note=order.get("admin_note"),
+            payment_note=order.get("payment_note"),
+            tracking_id=order.get("tracking_id"),
+            courier_partner=order.get("courier_partner"),
         ))
+
+        # Load updated history
+        history_result = await db.execute(
+            select(order_history_table)
+            .where(order_history_table.c.order_id == order_id)
+            .order_by(order_history_table.c.changed_at)
+        )
+        order["history"] = [dict(event) for event in history_result.mappings()]
+
+    if previous != payload.status:
+        order["email_notification_status"] = await send_order_status_email(
+            db,
+            order,
+            payload.status,
+        )
     return order
 
 
 @router.get("/coupons", dependencies=[Depends(require_admin)])
 async def admin_coupons(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
-    result = await db.execute(select(coupons_table).order_by(coupons_table.c.id))
+    result = await db.execute(select(coupons_table).order_by(coupons_table.c.code))
     return [_coupon_response(row) for row in result.mappings()]
 
 
@@ -629,7 +926,7 @@ async def create_coupon(payload: CouponInput, db: AsyncSession = Depends(get_db)
 
 
 @router.put("/coupons/{coupon_id}", dependencies=[Depends(require_admin)])
-async def update_coupon(coupon_id: int, payload: CouponInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def update_coupon(coupon_id: UUID, payload: CouponInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     values = _coupon_payload(payload)
     values["code"] = values["code"].strip().upper()
     try:
@@ -645,15 +942,8 @@ async def update_coupon(coupon_id: int, payload: CouponInput, db: AsyncSession =
 
 
 @router.delete("/coupons/{coupon_id}", status_code=204, dependencies=[Depends(require_admin)])
-async def delete_coupon(coupon_id: str, db: AsyncSession = Depends(get_db)) -> None:
-    try:
-        identifier = int(coupon_id)
-    except ValueError:
-        result = await db.execute(delete(coupons_table).where(
-            coupons_table.c.code == coupon_id.strip().upper()
-        ))
-    else:
-        result = await db.execute(delete(coupons_table).where(coupons_table.c.id == identifier))
+async def delete_coupon(coupon_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
+    result = await db.execute(delete(coupons_table).where(coupons_table.c.id == coupon_id))
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Coupon not found.")
     await db.commit()
@@ -671,8 +961,9 @@ async def admin_reviews(
     return [dict(row) for row in result.mappings()]
 
 
+@router.put("/reviews/{review_id}", dependencies=[Depends(require_admin)])
 @router.patch("/reviews/{review_id}", dependencies=[Depends(require_admin)])
-async def moderate_review(review_id: int, payload: ReviewStatusInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+async def moderate_review(review_id: UUID, payload: ReviewStatusInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(update(reviews_table).where(reviews_table.c.id == review_id).values(status=payload.status))
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Review not found.")
