@@ -1,0 +1,108 @@
+"""Environment-configured single-admin login and signed bearer tokens."""
+
+import base64
+import hashlib
+import hmac
+import json
+import os
+import secrets
+import time
+
+from fastapi import Depends, HTTPException
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.database import admin_users_table, get_db
+
+bearer = HTTPBearer(auto_error=False)
+_PASSWORD_SCRYPT_N = 2**14
+
+
+def _secret() -> str:
+    secret = os.getenv("ADMIN_TOKEN_SECRET")
+    if not secret or len(secret) < 32:
+        raise HTTPException(status_code=503, detail="Admin authentication is not configured.")
+    return secret
+
+
+def hash_password(password: str) -> str:
+    salt = secrets.token_bytes(16)
+    digest = hashlib.scrypt(
+        password.encode("utf-8"),
+        salt=salt,
+        n=_PASSWORD_SCRYPT_N,
+        r=8,
+        p=1,
+        dklen=32,
+    )
+    return "scrypt${}${}${}${}${}".format(
+        _PASSWORD_SCRYPT_N,
+        8,
+        1,
+        base64.urlsafe_b64encode(salt).decode("ascii"),
+        base64.urlsafe_b64encode(digest).decode("ascii"),
+    )
+
+
+def verify_password(password: str, encoded: str) -> bool:
+    try:
+        algorithm, n_value, r_value, p_value, salt_value, digest_value = encoded.split("$")
+        if algorithm != "scrypt":
+            return False
+        n, r, p = int(n_value), int(r_value), int(p_value)
+        if n != _PASSWORD_SCRYPT_N or r != 8 or p != 1:
+            return False
+        salt = base64.urlsafe_b64decode(salt_value.encode("ascii"))
+        expected = base64.urlsafe_b64decode(digest_value.encode("ascii"))
+        actual = hashlib.scrypt(
+            password.encode("utf-8"),
+            salt=salt,
+            n=n,
+            r=r,
+            p=p,
+            dklen=len(expected),
+        )
+        return hmac.compare_digest(actual, expected)
+    except (ValueError, TypeError, UnicodeError):
+        return False
+
+
+def issue_token(email: str) -> str:
+    payload = base64.urlsafe_b64encode(
+        json.dumps({"sub": email, "exp": int(time.time()) + 8 * 60 * 60}, separators=(",", ":")).encode()
+    ).rstrip(b"=")
+    signature = hmac.new(_secret().encode(), payload, hashlib.sha256).digest()
+    return payload.decode() + "." + base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
+
+
+async def require_admin(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+    db: AsyncSession = Depends(get_db),
+) -> str:
+    if credentials is None or credentials.scheme.lower() != "bearer":
+        raise HTTPException(status_code=401, detail="Admin authentication required.")
+    try:
+        encoded, signed = credentials.credentials.split(".", 1)
+        expected = base64.urlsafe_b64encode(
+            hmac.new(_secret().encode(), encoded.encode(), hashlib.sha256).digest()
+        ).rstrip(b"=").decode()
+        if not hmac.compare_digest(signed, expected):
+            raise ValueError
+        payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
+        if int(payload.get("exp", 0)) <= int(time.time()):
+            raise ValueError
+        email = str(payload["sub"]).strip().casefold()
+        result = await db.execute(
+            select(admin_users_table.c.id).where(
+                admin_users_table.c.email == email,
+                admin_users_table.c.is_active.is_(True),
+            )
+        )
+        if result.scalar_one_or_none() is None:
+            raise ValueError
+        return email
+    except HTTPException:
+        raise
+    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+        raise HTTPException(status_code=401, detail="Invalid or expired admin token.")

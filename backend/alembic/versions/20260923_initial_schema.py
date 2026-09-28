@@ -51,6 +51,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.text("CURRENT_TIMESTAMP")),
     )
 
+
     op.create_table(
         "product_variants",
         sa.Column("id", sa.Integer(), primary_key=True, nullable=False),

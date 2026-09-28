@@ -47,4 +47,4 @@ Admin updates should trigger on-demand revalidation from the admin write flow (f
 
 ## Scope note
 
-This initial build focuses on the project shell, data contracts, and the SEO-critical storefront routes (`/`, collection pages, PDPs, recipes, blogs, and order lookup). The backend includes the main CRUD endpoints and sample seed data for local development. The admin, checkout, and richer promo flows follow the same structure and are ready to be extended in subsequent iterations.
+This initial build focuses on the project shell, data contracts, and the SEO-critical storefront routes (`/`, collection pages, PDPs, recipes, blogs, and order lookup). The backend includes the main CRUD endpoints and sample seed data for local development. Guest cart and checkout now include server-validated starter promos, domestic shipping thresholds, and a configurable “Flying Abroad” shipping matrix. Automated order confirmation email/SMS/WhatsApp notifications are intentionally deferred; the checkout shows the order reference and routes payment confirmation through the admin by phone.

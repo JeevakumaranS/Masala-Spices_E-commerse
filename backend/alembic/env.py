@@ -15,7 +15,7 @@ if config.config_file_name is not None:
 
 target_metadata = None
 
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", "postgresql+asyncpg://masala:masala123@localhost:5432/masala_db"))
+config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:user@localhost:5432/masala_db"))
 
 
 def run_migrations_offline() -> None:
