@@ -45,7 +45,7 @@ export default function CheckoutPage() {
 
   const subtotal = receipt?.subtotal ?? selectSubtotal(summaryLines);
   const discount =
-    receipt?.discount ?? calculatePromo(promoCode, summaryLines, selectSubtotal(summaryLines), promoDiscount);
+    receipt?.discount ?? calculatePromo(promoCode, promoDiscount);
   const summaryMode = receipt?.deliveryMode ?? deliveryMode;
   const summaryCountry = receipt?.countryCode ?? destinationCountry;
   const destination = getShippingDestination(summaryCountry);

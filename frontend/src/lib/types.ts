@@ -69,6 +69,18 @@ export type Recipe = {
   video_url?: string | null;
 };
 
+export type ActiveOffer = {
+  code: string;
+  kind: "percentage" | "fixed" | "buy_x_get_y" | "combo";
+  label: string;
+  discount_value: number;
+  minimum_order: number;
+  max_discount?: number | null;
+  buy_quantity: number;
+  free_quantity: number;
+  first_order_only: boolean;
+};
+
 export type BlogPost = {
   /** Only returned by the list endpoint (`GET /api/blog`). */
   id?: string;

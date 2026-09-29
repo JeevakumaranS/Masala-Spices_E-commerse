@@ -248,7 +248,7 @@ export function CheckoutForm({ onPlaced }: Props) {
   const selectedCountryCode = useWatch({ control, name: "country_code" }) ?? destinationCountry;
   const destination = getShippingDestination(selectedCountryCode);
   const subtotal = selectSubtotal(lines);
-  const discount = calculatePromo(promoCode, lines, subtotal, promoDiscount);
+  const discount = calculatePromo(promoCode, promoDiscount);
   const shipping = selectShipping(lines, selectedMode, selectedCountryCode, discount);
   const total = selectTotal(lines, selectedMode, selectedCountryCode, discount);
 

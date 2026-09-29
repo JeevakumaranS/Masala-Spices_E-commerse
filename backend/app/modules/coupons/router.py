@@ -3,8 +3,8 @@
 from datetime import date
 from decimal import Decimal
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from fastapi import APIRouter, Depends, HTTPException, Response
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import coupons_table, get_db, orders_table
@@ -16,6 +16,37 @@ from app.modules.coupons.service import (
 from app.modules.orders.catalog import CatalogValidationError, quote_order_items
 
 router = APIRouter(prefix="/api/coupons", tags=["coupons"])
+
+
+@router.get("/active")
+async def list_active_coupons(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    response.headers["Cache-Control"] = "no-store"
+    today = date.today()
+    result = await db.execute(
+        select(
+            coupons_table.c.code,
+            coupons_table.c.kind,
+            coupons_table.c.label,
+            coupons_table.c.discount_value,
+            coupons_table.c.minimum_order,
+            coupons_table.c.max_discount,
+            coupons_table.c.starts_at,
+            coupons_table.c.ends_at,
+            coupons_table.c.buy_quantity,
+            coupons_table.c.free_quantity,
+            coupons_table.c.first_order_only,
+        )
+        .where(
+            coupons_table.c.active.is_(True),
+            or_(coupons_table.c.starts_at.is_(None), coupons_table.c.starts_at <= today),
+            or_(coupons_table.c.ends_at.is_(None), coupons_table.c.ends_at >= today),
+        )
+        .order_by(coupons_table.c.code)
+    )
+    return [dict(row) for row in result.mappings()]
 
 
 @router.post("/validate", response_model=CouponValidationResponse)

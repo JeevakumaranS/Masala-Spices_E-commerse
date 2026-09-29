@@ -27,7 +27,7 @@ import {
   TrashIcon,
   TruckIcon,
 } from "@/components/ui/icons";
-import { calculatePromo, PROMO_RULES, validatePromoCode } from "@/lib/promos";
+import { calculatePromo, validatePromoCode } from "@/lib/promos";
 import { getShippingDestination } from "@/lib/shipping";
 
 const QUICK_LINKS = [
@@ -56,7 +56,7 @@ export default function CartPage() {
 
   const count = selectCount(lines);
   const subtotal = selectSubtotal(lines);
-  const discount = calculatePromo(promoCode, lines, subtotal, promoDiscount);
+  const discount = calculatePromo(promoCode, promoDiscount);
   const shipping = selectShipping(lines, deliveryMode, destinationCountry, discount);
   const savings = selectSavings(lines);
   const total = selectTotal(lines, deliveryMode, destinationCountry, discount);
@@ -343,7 +343,7 @@ export default function CartPage() {
                       <input
                         id="promo-code"
                         className="input"
-                        placeholder="FIRST10"
+                        placeholder="Enter offer code"
                         value={promoInput}
                         onChange={(event) => {
                           setPromoInput(event.target.value);
@@ -362,7 +362,7 @@ export default function CartPage() {
                     </div>
 
                     <p className="mt-1.5 text-[0.7rem] text-ink-400">
-                      Starter codes: FIRST10, FESTIVE20 and BIRYANI3.
+                      Find current offers in the announcement bar.
                     </p>
 
                     {promoError ? (
@@ -372,7 +372,7 @@ export default function CartPage() {
                     ) : promoCode && discount > 0 ? (
                       <p className="mt-2 flex items-center gap-1.5 text-xs font-semibold text-cardamom-700">
                         <CheckCircleIcon className="size-3.5" />
-                        {promoCode} applied — {promoLabel ?? PROMO_RULES[promoCode]?.blurb ?? "discount applied"}
+                        {promoCode} applied — {promoLabel ?? "discount applied"}
                       </p>
                     ) : null}
                   </form>

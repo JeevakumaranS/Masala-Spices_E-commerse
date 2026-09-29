@@ -34,12 +34,12 @@ export function HeroImageCarousel({ images }: { images: HeroImage[] }) {
 
   return (
     <div
-      className="relative w-full max-w-full bg-white animate-fade-up md:max-w-[75vw]"
+      className="relative w-full max-w-full animate-fade-up"
       style={{ animationDelay: "140ms" }}
       aria-roledescription="carousel"
       aria-label="Masala House product and spice images"
     >
-      <div className="w-full bg-white">
+      <div className="w-full">
         <div className="relative overflow-hidden">
           {heroImages.map((image, index) => (
             <div
@@ -50,7 +50,7 @@ export function HeroImageCarousel({ images }: { images: HeroImage[] }) {
               <SmartImage
                 src={image.src}
                 alt={image.alt}
-                aspect="aspect-[2.35/1]"
+                aspect="aspect-[2.76/1]"
                 priority={index === 0}
                 sizes="100vw"
                 wrapperClassName="rounded-none"

@@ -5,11 +5,11 @@ import { usePathname } from "next/navigation";
 import { useEffect, useRef, useState } from "react";
 import { Logo } from "@/components/Logo";
 import { getCategories } from "@/lib/api";
-import type { Category } from "@/lib/types";
+import type { ActiveOffer, Category } from "@/lib/types";
 import { cn } from "@/lib/cn";
+import { apiClient } from "@/lib/http";
 import { selectCount, useCartHydrated, useCartStore } from "@/store/cart";
 import { useUIStore } from "@/store/ui";
-import { PROMO_RULES } from "@/lib/promos";
 import {
   BagIcon,
   ChevronDownIcon,
@@ -19,19 +19,6 @@ import {
   ArrowRightIcon,
   PhoneIcon,
 } from "@/components/ui/icons";
-
-function getActivePromotions(): string[] {
-  const today = new Date();
-  const active: string[] = [];
-  for (const rule of Object.values(PROMO_RULES)) {
-    if (rule.activeFrom && today < new Date(`${rule.activeFrom}T00:00:00`)) continue;
-    if (rule.activeUntil && today > new Date(`${rule.activeUntil}T23:59:59`)) continue;
-    active.push(rule.blurb);
-  }
-  return active.length
-    ? active
-    : ["Free shipping on orders over ₹349", "Ground fresh every Tuesday — never older than 14 days"];
-}
 
 const FALLBACK_CATEGORIES: Pick<Category, "name" | "slug">[] = [
   { name: "Breakfast Masalas", slug: "breakfast-masalas" },
@@ -81,6 +68,7 @@ export function Header() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collectionsOpen, setCollectionsOpen] = useState(false);
   const [categories, setCategories] = useState<Category[]>([]);
+  const [promotions, setPromotions] = useState<ActiveOffer[]>([]);
   const [announcement, setAnnouncement] = useState(0);
 
   const collectionsRef = useRef<HTMLDivElement>(null);
@@ -115,9 +103,29 @@ export function Header() {
     };
   }, []);
 
-  /* ---- rotating announcement ---- */
-  const promotions = getActivePromotions();
+  /* ---- database-backed offer announcement ---- */
   useEffect(() => {
+    let cancelled = false;
+    void apiClient
+      .get<ActiveOffer[]>("/api/coupons/active")
+      .then(({ data }) => {
+        if (!cancelled) setPromotions(data);
+      })
+      .catch((error: unknown) => {
+        if (!cancelled) {
+          console.error("Active promotions could not be loaded.", error);
+          setPromotions([]);
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (promotions.length < 2) {
+      return;
+    }
     const id = window.setInterval(
       () => setAnnouncement((i) => (i + 1) % promotions.length),
       5000,
@@ -200,24 +208,31 @@ export function Header() {
   };
   const isActive = (href: string) =>
     pathname === href || pathname.startsWith(`${href}/`);
+  const activeAnnouncement = promotions.length
+    ? promotions[announcement % promotions.length]
+    : null;
 
   return (
     <header className="sticky top-0 z-50">
       {/* ---------- Announcement ---------- */}
-      <div className="relative overflow-hidden bg-ink-950 text-paper-100">
-        <div className="shell flex h-9 items-center justify-center">
-          <p
-            key={announcement}
-            className="truncate text-center text-[0.7rem] font-medium tracking-[0.14em] uppercase animate-fade-in sm:text-[0.75rem]"
-          >
-            {promotions[announcement]}
-          </p>
+      {activeAnnouncement ? (
+        <div className="relative overflow-hidden bg-ink-950 text-paper-100">
+          <div className="shell flex h-9 items-center justify-center">
+            <Link
+              key={announcement}
+              href="/cart"
+              className="truncate text-center text-[0.7rem] font-medium tracking-[0.14em] uppercase animate-fade-in hover:text-saffron-300 sm:text-[0.75rem]"
+              aria-label={`Offer ${activeAnnouncement.label}, code ${activeAnnouncement.code}. Go to cart to use this offer.`}
+            >
+              {activeAnnouncement.label} · Use code {activeAnnouncement.code}
+            </Link>
+          </div>
+          <div
+            className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,transparent,rgb(242 195 107/0.16),transparent)]"
+            aria-hidden="true"
+          />
         </div>
-        <div
-          className="pointer-events-none absolute inset-0 bg-[linear-gradient(90deg,transparent,rgb(242 195 107/0.16),transparent)]"
-          aria-hidden="true"
-        />
-      </div>
+      ) : null}
 
       {/* ---------- Main bar ---------- */}
       <div

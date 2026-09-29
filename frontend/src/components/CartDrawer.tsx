@@ -59,7 +59,7 @@ export function CartDrawer() {
   if (!open) return null;
 
   const subtotal = selectSubtotal(lines);
-  const discount = calculatePromo(promoCode, lines, subtotal, promoDiscount);
+  const discount = calculatePromo(promoCode, promoDiscount);
   const shipping = selectShipping(lines, deliveryMode, destinationCountry, discount);
   const savings = selectSavings(lines);
   const count = selectCount(lines);

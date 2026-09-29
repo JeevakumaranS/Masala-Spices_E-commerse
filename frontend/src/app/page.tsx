@@ -6,13 +6,10 @@ import { SectionHeading } from "@/components/ui/SectionHeading";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { HeroImageCarousel } from "@/components/HeroImageCarousel";
 import { SmartImage } from "@/components/ui/SmartImage";
-import { getCategories, getProducts, getRecipes } from "@/lib/api";
+import { getActiveOffers, getCategories, getProducts, getRecipes } from "@/lib/api";
+import { formatINR } from "@/lib/format";
 import {
   ArrowRightIcon,
-  FlameIcon,
-  LeafIcon,
-  PackageIcon,
-  SparkleIcon,
 } from "@/components/ui/icons";
 
 export const metadata: Metadata = {
@@ -30,33 +27,6 @@ const TICKER = [
   "Recipes that actually work",
 ];
 
-const PROCESS = [
-  {
-    step: "01",
-    title: "Sourced whole",
-    body: "Whole spices bought by the lot from growers we visit — never pre-ground commodity powder.",
-    Icon: LeafIcon,
-  },
-  {
-    step: "02",
-    title: "Slow roasted",
-    body: "Each spice is roasted on its own schedule, because coriander and chilli never share one.",
-    Icon: FlameIcon,
-  },
-  {
-    step: "03",
-    title: "Stone ground",
-    body: "Ground cool and slow so the volatile oils stay in the jar instead of drifting off as heat.",
-    Icon: SparkleIcon,
-  },
-  {
-    step: "04",
-    title: "Sealed fresh",
-    body: "Packed in nitrogen-flushed pouches the same week — dated, traceable, and never stockpiled.",
-    Icon: PackageIcon,
-  },
-];
-
 const CTA_LINKS = [
   { label: "All recipes", href: "/recipes" },
   { label: "Bulk orders", href: "/pages/bulk-order" },
@@ -65,15 +35,19 @@ const CTA_LINKS = [
 ];
 
 export default async function HomePage() {
-  const [categories, products, recipes] = await Promise.all([
+  const [categories, products, recipes, offers, comboProducts] = await Promise.all([
     getCategories(),
     getProducts(),
     getRecipes(),
+    getActiveOffers(),
+    getProducts("combos-packs"),
   ]);
 
   const bestsellers = products.slice(0, 6);
   const featuredCategories = categories.slice(0, 3);
   const featuredRecipes = recipes.slice(0, 4);
+  const featuredCombos = comboProducts.slice(0, 4);
+  const featuredOffers = offers.slice(0, 3);
 
   return (
     <>
@@ -208,60 +182,66 @@ export default async function HomePage() {
         </div>
       </section>
 
-      {/* ============================ PROCESS ============================ */}
-      <section className="shell py-14 md:py-20">
-        <div className="grid gap-10 lg:grid-cols-[0.85fr_1.15fr] lg:gap-14">
+      {/* ============================ COMBOS & OFFERS ============================ */}
+      <section className="bg-paper-50 py-14 md:py-20">
+        <div className="shell">
           <Reveal>
-            <div className="lg:sticky lg:top-32">
-              <p className="eyebrow">Why we taste different</p>
-              <h2 className="section-title mt-3">
-                Four steps, no shortcuts, every single week.
-              </h2>
-              <p className="lede mt-4">
-                Most masala is pre-ground, blended from commodity powder, and sits for months.
-                We do it the slow way because you can taste the difference in a single spoon.
-              </p>
-
-              <div className="mt-7 rounded-3xl border border-paper-200 bg-paper-100 p-5">
-                <div className="flex items-start gap-3">
-                  <span className="mt-0.5 grid size-9 shrink-0 place-items-center rounded-full bg-white text-masala-700 shadow-sm">
-                    <LeafIcon className="size-5" />
-                  </span>
-                  <p className="text-sm leading-relaxed text-ink-600">
-                    <span className="font-semibold text-ink-900">Flavour-first cooking.</span>{" "}
-                    Every blend is built around a dish, not a margin — so the ratio works in a
-                    real kitchen, on a real Tuesday.
-                  </p>
-                </div>
-              </div>
-
-              <Link href="/pages/about" className="btn btn-secondary mt-6">
-                Our full story
-                <ArrowRightIcon className="size-4" />
-              </Link>
-            </div>
+            <SectionHeading
+              eyebrow="Better value"
+              title="Combos made for the way you cook"
+              description="Stock up on pantry favourites and take advantage of our latest offers."
+              action={{ label: "Shop all combos", href: "/collections/combos-packs" }}
+            />
           </Reveal>
 
-          <ol className="grid gap-4 sm:grid-cols-2">
-            {PROCESS.map((item, index) => (
-              <Reveal key={item.step} delay={index * 90} className="h-full">
-                <li className="card card-hover flex h-full flex-col p-6">
-                  <div className="flex items-start justify-between">
-                    <span className="grid size-11 place-items-center rounded-2xl bg-masala-50 text-masala-700">
-                      <item.Icon className="size-5" />
-                    </span>
-                    <span className="font-display text-2xl font-semibold text-paper-300">
-                      {item.step}
-                    </span>
-                  </div>
-                  <h3 className="mt-5 font-display text-xl font-semibold text-ink-950">
-                    {item.title}
-                  </h3>
-                  <p className="mt-2 text-sm leading-relaxed text-ink-600">{item.body}</p>
-                </li>
-              </Reveal>
-            ))}
-          </ol>
+          {featuredCombos.length ? (
+            <div className="mt-8 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+              {featuredCombos.map((product, index) => (
+                <Reveal key={product.id} delay={index * 70} className="h-full">
+                  <ProductCard product={product} density="compact" className="h-full" />
+                </Reveal>
+              ))}
+            </div>
+          ) : (
+            <p className="mt-6 text-sm text-ink-500">
+              Combo packs are coming soon. Browse all{" "}
+              <Link href="/collections/combos-packs" className="font-semibold text-masala-700 underline">
+                combos and packs
+              </Link>
+              .
+            </p>
+          )}
+
+          <div className="mt-10">
+            <h3 className="font-display text-2xl font-semibold text-ink-950">Current offers</h3>
+            {featuredOffers.length ? (
+              <div className="mt-4 grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+                {featuredOffers.map((offer) => (
+                  <article key={offer.code} className="rounded-2xl border border-saffron-200 bg-white p-5">
+                    <p className="font-semibold text-ink-950">{offer.label}</p>
+                    <p className="mt-1 text-sm font-medium text-masala-700">
+                      {offer.kind === "percentage"
+                        ? `${offer.discount_value}% off`
+                        : offer.kind === "fixed"
+                          ? `${formatINR(offer.discount_value)} off`
+                          : `Buy ${offer.buy_quantity}, get ${offer.free_quantity}`}
+                      {offer.first_order_only ? " · First order" : ""}
+                    </p>
+                    <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-paper-200 pt-3">
+                      <span className="text-xs text-ink-500">
+                        {offer.minimum_order > 0 ? `On orders over ${formatINR(offer.minimum_order)}` : "Use at checkout"}
+                      </span>
+                      <span className="rounded-lg bg-saffron-100 px-2.5 py-1 font-mono text-sm font-bold tracking-wider text-ink-900">
+                        {offer.code}
+                      </span>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : (
+              <p className="mt-2 text-sm text-ink-500">No active offers right now. Check back soon.</p>
+            )}
+          </div>
         </div>
       </section>
 
@@ -300,7 +280,7 @@ export default async function HomePage() {
               />
             </div>
           ) : (
-            <div className="mt-8 grid gap-5 md:grid-cols-3">
+            <div className="mt-8 grid gap-5 md:grid-cols-4">
               {featuredRecipes.map((recipe, index) => (
                 <Reveal key={recipe.slug} delay={index * 90} className="h-full">
                   <Link
@@ -311,7 +291,7 @@ export default async function HomePage() {
                       src={recipe.hero_image_url}
                       alt={recipe.title}
                       aspect="aspect-video"
-                      sizes="(max-width: 768px) 100vw, 33vw"
+                      sizes="(max-width: 768px) 100vw, 25vw"
                       zoom
                     />
                     <div className="flex flex-1 flex-col p-5">

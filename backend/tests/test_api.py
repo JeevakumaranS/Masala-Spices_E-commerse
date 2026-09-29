@@ -5,9 +5,11 @@ from uuid import uuid4
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 
 from app.core.application import create_app
 from app.core.database import DATABASE_URL
+from app.modules.admin.router import CouponInput
 
 
 @pytest.fixture(scope="module")
@@ -69,6 +71,7 @@ def test_review_moderation_supports_put(client: TestClient) -> None:
         ("/api/categories", None),
         ("/api/products", "items"),
         ("/api/recipes", "items"),
+        ("/api/coupons/active", None),
         ("/api/blog", None),
         ("/api/store-locations", "items"),
     ],
@@ -86,11 +89,61 @@ def test_public_collection_endpoints(
     assert isinstance(items, list)
 
 
+def test_active_coupon_listing_contains_only_public_offer_fields(
+    client: TestClient,
+) -> None:
+    response = client.get("/api/coupons/active")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == "no-store"
+    offers = response.json()
+    assert isinstance(offers, list)
+    public_fields = {
+        "code",
+        "kind",
+        "label",
+        "discount_value",
+        "minimum_order",
+        "max_discount",
+        "starts_at",
+        "ends_at",
+        "buy_quantity",
+        "free_quantity",
+        "first_order_only",
+    }
+    assert all(set(offer) <= public_fields for offer in offers)
+
+
 def test_admin_orders_requires_authentication(client: TestClient) -> None:
     response = client.get("/api/admin/orders")
 
     assert response.status_code == 401
     assert response.json()["detail"] == "Admin authentication required."
+
+
+def test_simple_admin_coupon_payload_is_accepted() -> None:
+    coupon = CouponInput.model_validate({
+        "code": "  save10 ",
+        "kind": "percentage",
+        "discount_value": 10,
+        "minimum_order": 0,
+        "active": True,
+    })
+
+    assert coupon.code == "SAVE10"
+    assert coupon.label == "SAVE10"
+    assert coupon.discount_value == 10
+
+
+def test_buy_x_get_y_coupon_requires_terms_and_quantities() -> None:
+    with pytest.raises(ValidationError, match="eligible term"):
+        CouponInput.model_validate({
+            "code": "BUNDLE",
+            "kind": "buy_x_get_y",
+            "buy_quantity": 2,
+            "free_quantity": 1,
+            "eligible_terms": [],
+        })
 
 
 def test_product_review_submission_serializes_uuid_ids(client: TestClient) -> None:

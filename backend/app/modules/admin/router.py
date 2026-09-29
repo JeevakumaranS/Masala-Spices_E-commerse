@@ -103,7 +103,7 @@ class OrderReviewInput(BaseModel):
 class CouponInput(BaseModel):
     code: str = Field(min_length=1, max_length=40)
     kind: Literal["percentage", "fixed", "buy_x_get_y", "combo"]
-    label: str = Field(min_length=1, max_length=255)
+    label: str = Field(default="", max_length=255)
     discount_value: Decimal = Field(default=Decimal("0"), ge=0)
     minimum_order: Decimal = Field(default=Decimal("0"), ge=0)
     max_discount: Decimal | None = Field(default=None, ge=0)
@@ -122,6 +122,19 @@ class CouponInput(BaseModel):
 
     @model_validator(mode="after")
     def validate_combo_configuration(self) -> "CouponInput":
+        self.code = self.code.strip().upper()
+        if not self.code:
+            raise ValueError("Enter a promotion code.")
+        self.label = self.label.strip() or self.code
+        self.eligible_terms = [term.strip() for term in self.eligible_terms if term.strip()]
+        if self.kind == "percentage":
+            value = self.percentage if self.percentage is not None else self.discount_value
+            if value <= 0 or value > 100:
+                raise ValueError("Percentage discount must be between 0 and 100.")
+        elif self.kind == "fixed":
+            value = self.fixed_amount if self.fixed_amount is not None else self.discount_value
+            if value <= 0:
+                raise ValueError("Enter a discount amount greater than zero.")
         if self.kind in {"buy_x_get_y", "combo"} and (
             self.buy_quantity < 1
             or self.free_quantity < 1
@@ -130,6 +143,8 @@ class CouponInput(BaseModel):
             raise ValueError(
                 "Combo offers require at least one eligible term, one buy quantity, and one free quantity."
             )
+        if self.starts_at and self.ends_at and self.ends_at < self.starts_at:
+            raise ValueError("The end date must be on or after the start date.")
         return self
 
     @model_validator(mode="before")

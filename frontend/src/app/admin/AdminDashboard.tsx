@@ -41,7 +41,7 @@ import {
 } from "@/components/ui/icons";
 import { formatINR, formatShortINR } from "@/lib/format";
 
-type Section = "overview" | "orders" | "products" | "categories" | "coupons" | "reviews" | "analytics" | "api";
+type Section = "overview" | "orders" | "products" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
 type OrderFilter = "all" | "placed" | "processing" | "shipped";
 type VariantDraft = {
   pack_size: string;
@@ -74,7 +74,9 @@ type CouponDraft = {
   minimum_order: string;
   discount: string;
   max_discount: string;
+  buy_quantity: string;
   free_quantity: string;
+  eligible_terms: string;
   active_from: string;
   active_until: string;
   is_active: boolean;
@@ -86,6 +88,7 @@ const NAV: { id: Section; label: string; Icon: typeof HomeIcon }[] = [
   { id: "orders", label: "Orders", Icon: BagIcon },
   { id: "products", label: "Products", Icon: PackageIcon },
   { id: "categories", label: "Categories", Icon: TagIcon },
+  { id: "campaigns", label: "Combos & offers", Icon: FlameIcon },
   { id: "coupons", label: "Promotions", Icon: FlameIcon },
   { id: "reviews", label: "Reviews", Icon: StarIcon },
   { id: "analytics", label: "Analytics", Icon: UtensilsIcon },
@@ -254,9 +257,15 @@ export default function AdminDashboard() {
   const [productEditor, setProductEditor] = useState<ProductDraft | null>(null);
   const [categoryEditor, setCategoryEditor] = useState<AdminCategory | null | "new">(null);
   const [couponEditor, setCouponEditor] = useState<AdminCoupon | null | "new">(null);
+  const [couponKind, setCouponKind] = useState<AdminCoupon["kind"]>("percentage");
   const [activeOrder, setActiveOrder] = useState<AdminOrder | null>(null);
   const [originalOrderStatus, setOriginalOrderStatus] = useState("");
   const [productToAdd, setProductToAdd] = useState("");
+
+  const navigateToSection = (nextSection: Section) => {
+    setNotice("");
+    setSection(nextSection);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -524,6 +533,9 @@ export default function AdminDashboard() {
       [product.name, product.slug, ...product.categories].join(" ").toLowerCase().includes(needle),
     );
   }, [products, search]);
+  const comboProducts = filteredProducts.filter((product) =>
+    product.categories.some((category) => /combo|pack/i.test(category)),
+  );
 
   if (!token) {
     const firstAdminSetup = registrationStatus !== null && !registrationStatus.admins_exist;
@@ -600,7 +612,7 @@ export default function AdminDashboard() {
     );
   }
 
-  const openProduct = (product?: AdminProduct) => {
+  const openProduct = (product?: AdminProduct, combo = false) => {
     setProductEditor(
       product
         ? {
@@ -631,7 +643,9 @@ export default function AdminDashboard() {
             slug: "",
             description: "",
             ingredients: "",
-            categories: "",
+            categories: combo
+              ? categories.find((category) => /combo|pack/i.test(`${category.slug} ${category.name}`))?.slug ?? "combos-packs"
+              : "",
             dish_type: "",
             status: "active",
             price: "",
@@ -711,31 +725,33 @@ export default function AdminDashboard() {
     if (!couponEditor) return;
     const form = new FormData(event.currentTarget);
     const code = String(form.get("code") ?? "").trim().toUpperCase();
-    const label = String(form.get("label") ?? "").trim();
+    const label = String(form.get("label") ?? "").trim() || code;
     const kind = String(form.get("kind") ?? "percentage") as AdminCoupon["kind"];
     const amountValue = Number(form.get("discount") ?? 0);
     const minimumOrder = Number(form.get("minimum_order") ?? 0);
     const maxDiscountValue = String(form.get("max_discount") ?? "").trim();
+    const buyQuantity = Number(form.get("buy_quantity") ?? 0);
     const freeQuantity = Number(form.get("free_quantity") ?? 0);
     const isActive = form.get("is_active") === "on";
     const firstOrderOnly = form.get("first_order_only") === "on";
     const activeFrom = String(form.get("active_from") ?? "");
     const activeUntil = String(form.get("active_until") ?? "");
-    const body: Partial<AdminCoupon> = {
+    const body = {
       code,
       label,
       kind,
+      discount_value: kind === "percentage" || kind === "fixed" ? amountValue : 0,
       minimum_order: minimumOrder,
-      first_order_only: firstOrderOnly,
-      is_active: isActive,
-      active_from: activeFrom || null,
-      active_until: activeUntil || null,
-      eligible_terms: String(form.get("eligible_terms") ?? "").split(",").map((term) => term.trim()).filter(Boolean),
-      percentage: kind === "percentage" ? amountValue : null,
-      fixed_amount: kind === "fixed" ? amountValue : null,
+      active: isActive,
+      starts_at: activeFrom || null,
+      ends_at: activeUntil || null,
+      first_order_only: kind === "percentage" && firstOrderOnly,
       max_discount: maxDiscountValue ? Number(maxDiscountValue) : null,
-      buy_quantity: kind === "buy_x_get_y" || kind === "combo" ? amountValue : 0,
+      buy_quantity: kind === "buy_x_get_y" || kind === "combo" ? buyQuantity : 0,
       free_quantity: kind === "buy_x_get_y" || kind === "combo" ? freeQuantity : 0,
+      eligible_terms: (kind === "buy_x_get_y" || kind === "combo")
+        ? String(form.get("eligible_terms") ?? "").split(",").map((term) => term.trim()).filter(Boolean)
+        : [],
     };
     const id = couponEditor === "new" ? undefined : couponEditor.id;
     const saved = await runAction(
@@ -818,6 +834,11 @@ export default function AdminDashboard() {
     setActiveOrder(order);
     setOriginalOrderStatus(order.status);
   };
+  const openCouponEditor = (coupon: AdminCoupon | null | "new") => {
+    setCouponEditor(coupon);
+    setCouponKind(coupon === "new" || coupon === null ? "percentage" : coupon.kind === "combo" ? "buy_x_get_y" : coupon.kind);
+  };
+
   const newCoupon = (): CouponDraft => ({
     code: "",
     label: "",
@@ -825,7 +846,9 @@ export default function AdminDashboard() {
     minimum_order: "0",
     discount: "",
     max_discount: "",
+    buy_quantity: "2",
     free_quantity: "1",
+    eligible_terms: "",
     active_from: "",
     active_until: "",
     is_active: true,
@@ -854,7 +877,7 @@ export default function AdminDashboard() {
             <button
               key={id}
               type="button"
-              onClick={() => setSection(id)}
+              onClick={() => navigateToSection(id)}
               aria-current={section === id ? "page" : undefined}
               className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition md:w-full ${section === id ? "bg-saffron-400 text-ink-950 shadow-md" : "text-paper-300 hover:bg-white/10 hover:text-white"}`}
             >
@@ -913,7 +936,7 @@ export default function AdminDashboard() {
             orders={orders}
             products={products}
             reviews={reviews}
-            onOpenOrders={() => setSection("orders")}
+            onOpenOrders={() => navigateToSection("orders")}
             onSelectOrder={openOrder}
           />
         ) : null}
@@ -968,21 +991,25 @@ export default function AdminDashboard() {
           </section>
         ) : null}
 
-        {section === "products" ? (
+        {section === "products" || section === "campaigns" ? (
           <section className="mt-7">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-              <p className="text-sm text-ink-500">{products.length} products in catalog · stock and batch details are managed per pack size.</p>
+              <p className="text-sm text-ink-500">
+                {section === "campaigns"
+                  ? `${comboProducts.length} combos · manage bundle pricing, images and inventory here.`
+                  : `${products.length} products in catalog · stock and batch details are managed per pack size.`}
+              </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <label className="relative block">
                   <SearchIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400" />
-                  <input className={`${fieldClass} mt-0 pl-9`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search products" aria-label="Search products" />
+                  <input className={`${fieldClass} mt-0 pl-9`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={section === "campaigns" ? "Search combos" : "Search products"} aria-label={section === "campaigns" ? "Search combos" : "Search products"} />
                 </label>
-                <button type="button" onClick={() => openProduct()} className={primaryButton}><PlusIcon className="size-4" />Add product</button>
+                <button type="button" onClick={() => openProduct(undefined, section === "campaigns")} className={primaryButton}><PlusIcon className="size-4" />{section === "campaigns" ? "Create combo" : "Add product"}</button>
               </div>
             </div>
-            <ProductsTable products={filteredProducts} onEdit={openProduct} onDelete={async (product) => {
+            <ProductsTable products={section === "campaigns" ? comboProducts : filteredProducts} onEdit={openProduct} onDelete={async (product) => {
               if (!window.confirm(`Delete ${product.name}? This also removes its variants.`)) return;
-              await runAction(() => adminRequest(`/api/admin/products/${product.id}`, token, { method: "DELETE" }), "Product removed.");
+              await runAction(() => adminRequest(`/api/admin/products/${product.id}`, token, { method: "DELETE" }), section === "campaigns" ? "Combo removed." : "Product removed.");
             }} />
           </section>
         ) : null}
@@ -1016,11 +1043,13 @@ export default function AdminDashboard() {
           </section>
         ) : null}
 
-        {section === "coupons" ? (
+        {section === "coupons" || section === "campaigns" ? (
           <section className="mt-7">
             <div className="mb-4 flex items-center justify-between gap-3">
-              <p className="text-sm text-ink-500">Manage coupon rules and combo offers shown at checkout.</p>
-              <button type="button" className={primaryButton} onClick={() => setCouponEditor("new")}><PlusIcon className="size-4" />Create promotion</button>
+              <p className="text-sm text-ink-500">
+                {section === "campaigns" ? "Create and manage coupon offers shown on the storefront." : "Manage coupon rules and combo offers shown at checkout."}
+              </p>
+              <button type="button" className={primaryButton} onClick={() => openCouponEditor("new")}><PlusIcon className="size-4" />{section === "campaigns" ? "Create offer" : "Create promotion"}</button>
             </div>
             {coupons.length ? (
               <div className="grid gap-3 lg:grid-cols-2">
@@ -1036,7 +1065,7 @@ export default function AdminDashboard() {
                     </div>
                     {(coupon.active_from || coupon.active_until) ? <p className="mt-3 text-xs text-ink-400">{coupon.active_from || "Any date"} — {coupon.active_until || "No expiry"}</p> : null}
                     <div className="mt-4 flex gap-2">
-                      <button type="button" className={secondaryButton} onClick={() => setCouponEditor(coupon)}>Edit</button>
+                      <button type="button" className={secondaryButton} onClick={() => openCouponEditor(coupon)}>Edit</button>
                       <button type="button" className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50" aria-label={`Delete ${coupon.code}`} onClick={() => void removeCoupon(coupon)}><TrashIcon className="size-4" /></button>
                     </div>
                   </article>
@@ -1335,11 +1364,13 @@ export default function AdminDashboard() {
               const draft = couponEditor === "new" ? newCoupon() : {
                 code: couponEditor.code,
                 label: couponEditor.label,
-                kind: couponEditor.kind,
+                kind: couponEditor.kind === "combo" ? "buy_x_get_y" as const : couponEditor.kind,
                 minimum_order: String(couponEditor.minimum_order),
                 discount: String(couponEditor.percentage ?? couponEditor.fixed_amount ?? couponEditor.buy_quantity ?? ""),
                 max_discount: couponEditor.max_discount == null ? "" : String(couponEditor.max_discount),
+                buy_quantity: String(couponEditor.buy_quantity ?? 2),
                 free_quantity: String(couponEditor.free_quantity ?? 1),
+                eligible_terms: couponEditor.eligible_terms?.join(", ") ?? "",
                 active_from: couponEditor.active_from ?? "",
                 active_until: couponEditor.active_until ?? "",
                 is_active: couponEditor.is_active,
@@ -1348,19 +1379,30 @@ export default function AdminDashboard() {
               return (
                 <>
                   <label className={labelClass}>Code<input name="code" required defaultValue={draft.code} className={fieldClass} /></label>
-                  <label className={labelClass}>Customer-facing label<input name="label" required defaultValue={draft.label} className={fieldClass} /></label>
+                  <label className={labelClass}>Offer title (optional)<input name="label" defaultValue={draft.label} className={fieldClass} placeholder="e.g. 10% off your order" /></label>
                   <div className="grid gap-3 sm:grid-cols-2">
-                    <label className={labelClass}>Offer type<select name="kind" defaultValue={draft.kind} className={fieldClass}><option value="percentage">Percentage off</option><option value="fixed">Fixed amount off</option><option value="buy_x_get_y">Buy X get Y</option><option value="combo">Combo bundle</option></select></label>
-                    <label className={labelClass}>Discount / buy quantity<input name="discount" required min="1" type="number" step="0.01" defaultValue={draft.discount} className={fieldClass} /></label>
+                    <label className={labelClass}>Offer type<select name="kind" value={couponKind} onChange={(event) => setCouponKind(event.target.value as AdminCoupon["kind"])} className={fieldClass}><option value="percentage">Percentage off</option><option value="fixed">Amount off</option><option value="buy_x_get_y">Buy X, get Y free</option></select></label>
+                    {couponKind === "buy_x_get_y" ? (
+                      <>
+                        <label className={labelClass}>Buy quantity<input name="buy_quantity" required min="1" type="number" step="1" defaultValue={draft.buy_quantity} className={fieldClass} /></label>
+                        <label className={labelClass}>Free quantity<input name="free_quantity" required min="1" type="number" step="1" defaultValue={draft.free_quantity} className={fieldClass} /></label>
+                        <label className={`${labelClass} sm:col-span-2`}>Eligible product or dish<input name="eligible_terms" required defaultValue={draft.eligible_terms} className={fieldClass} placeholder="e.g. biryani" /><span className="mt-1 block font-normal text-ink-400">Separate multiple terms with commas.</span></label>
+                      </>
+                    ) : (
+                      <label className={labelClass}>{couponKind === "percentage" ? "Discount (%)" : "Discount (₹)"}<input name="discount" required min="0.01" max={couponKind === "percentage" ? "100" : undefined} type="number" step="0.01" defaultValue={draft.discount} className={fieldClass} /></label>
+                    )}
                     <label className={labelClass}>Minimum order (₹)<input name="minimum_order" min="0" type="number" step="0.01" defaultValue={draft.minimum_order} className={fieldClass} /></label>
-                    <label className={labelClass}>Maximum discount (₹, optional)<input name="max_discount" min="0" type="number" step="0.01" defaultValue={draft.max_discount} className={fieldClass} /></label>
-                    <label className={labelClass}>Free items in combo<input name="free_quantity" min="1" type="number" step="1" defaultValue={draft.free_quantity} className={fieldClass} /><span className="mt-1 block font-normal text-ink-400">Used for buy-X-get-Y offers.</span></label>
-                    <label className="flex items-center gap-2 pt-5 text-sm font-medium text-ink-700"><input name="is_active" type="checkbox" defaultChecked={draft.is_active} className="size-4 accent-masala-700" /> Promotion is active</label>
-                    <label className="flex items-center gap-2 text-sm font-medium text-ink-700"><input name="first_order_only" type="checkbox" defaultChecked={draft.first_order_only} className="size-4 accent-masala-700" /> First order only</label>
-                    <label className={labelClass}>Starts<input name="active_from" type="date" defaultValue={draft.active_from} className={fieldClass} /></label>
-                    <label className={labelClass}>Ends<input name="active_until" type="date" defaultValue={draft.active_until} className={fieldClass} /></label>
-                    <label className={`${labelClass} sm:col-span-2`}>Eligible product / dish terms (comma-separated)<input name="eligible_terms" defaultValue={couponEditor === "new" ? "" : couponEditor.eligible_terms?.join(", ") ?? ""} className={fieldClass} placeholder="biryani, sambar" /></label>
+                    <label className="flex items-center gap-2 text-sm font-medium text-ink-700"><input name="is_active" type="checkbox" defaultChecked={draft.is_active} className="size-4 accent-masala-700" /> Offer is active</label>
                   </div>
+                  <details className="rounded-xl border border-paper-200 px-4 py-3">
+                    <summary className="cursor-pointer text-sm font-semibold text-ink-700">Optional settings</summary>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
+                      <label className={labelClass}>Maximum discount (₹)<input name="max_discount" min="0" type="number" step="0.01" defaultValue={draft.max_discount} className={fieldClass} /></label>
+                      <label className="flex items-center gap-2 text-sm font-medium text-ink-700"><input name="first_order_only" type="checkbox" defaultChecked={draft.first_order_only} className="size-4 accent-masala-700" /> First order only</label>
+                      <label className={labelClass}>Starts<input name="active_from" type="date" defaultValue={draft.active_from} className={fieldClass} /></label>
+                      <label className={labelClass}>Ends<input name="active_until" type="date" defaultValue={draft.active_until} className={fieldClass} /></label>
+                    </div>
+                  </details>
                   <div className="flex justify-end gap-2 border-t border-paper-200 pt-4"><button type="button" className={secondaryButton} onClick={() => setCouponEditor(null)}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save promotion</button></div>
                 </>
               );

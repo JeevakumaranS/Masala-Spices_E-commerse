@@ -1,12 +1,17 @@
 import { unstable_cache } from "next/cache";
-import type { Category, Product, Recipe } from "@/lib/types";
+import type { ActiveOffer, Category, Product, Recipe } from "@/lib/types";
 import { apiClient } from "@/lib/http";
 
 async function fetchJson<T>(
   path: string,
   fallback: T | null = null,
+  cache = true,
 ): Promise<T | null> {
   try {
+    if (!cache) {
+      const response = await apiClient.get<T>(path);
+      return response.data;
+    }
     const cachedRequest = unstable_cache(
       async (requestPath: string) => {
         const response = await apiClient.get<T>(requestPath);
@@ -30,13 +35,20 @@ export async function getCategories(): Promise<Category[]> {
   return Array.isArray(payload) ? payload : (payload.items ?? []);
 }
 
-export async function getProducts(): Promise<Product[]> {
+export async function getProducts(category?: string): Promise<Product[]> {
+  const path = category
+    ? `/api/products?category=${encodeURIComponent(category)}`
+    : "/api/products";
   const payload = await fetchJson<{ items?: Product[] } | Product[]>(
-    "/api/products",
+    path,
     [],
   );
   if (!payload) return [];
   return Array.isArray(payload) ? payload : (payload.items ?? []);
+}
+
+export async function getActiveOffers(): Promise<ActiveOffer[]> {
+  return (await fetchJson<ActiveOffer[]>("/api/coupons/active", [], false)) ?? [];
 }
 
 export async function getProduct(slug: string): Promise<Product | null> {
