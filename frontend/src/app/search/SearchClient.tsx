@@ -77,8 +77,6 @@ export function SearchClient({ products, categories }: Props) {
   const [priceBand, setPriceBand] = useState<string | null>(null);
   const [packSize, setPackSize] = useState<string | null>(null);
   const [vegOnly, setVegOnly] = useState(false);
-  const [gingerGarlic, setGingerGarlic] = useState(false);
-  const [tamarind, setTamarind] = useState(false);
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -92,15 +90,13 @@ export function SearchClient({ products, categories }: Props) {
       if (priceBand === "over-300" && product.price <= 300) return false;
       if (packSize !== null && !product.variants.some((variant) => variant.pack_size === packSize)) return false;
       if (vegOnly && product.is_veg === false) return false;
-      if (gingerGarlic && !product.contains_ginger_garlic) return false;
-      if (tamarind && !product.contains_tamarind) return false;
       if (!needle) return true;
       return matchesSearch(product, needle);
     });
-  }, [products, query, category, spiceLevel, dishType, priceBand, packSize, vegOnly, gingerGarlic, tamarind]);
+  }, [products, query, category, spiceLevel, dishType, priceBand, packSize, vegOnly]);
 
   const activeCategory = categories.find((item) => item.slug === category) ?? null;
-  const hasFilters = query.trim().length > 0 || category !== null || spiceLevel !== null || dishType !== null || priceBand !== null || packSize !== null || vegOnly || gingerGarlic || tamarind;
+  const hasFilters = query.trim().length > 0 || category !== null || spiceLevel !== null || dishType !== null || priceBand !== null || packSize !== null || vegOnly;
 
   const clearFilters = () => {
     setQuery("");
@@ -110,8 +106,6 @@ export function SearchClient({ products, categories }: Props) {
     setPriceBand(null);
     setPackSize(null);
     setVegOnly(false);
-    setGingerGarlic(false);
-    setTamarind(false);
   };
 
   const applySearch = (term: string) => {
@@ -170,8 +164,6 @@ export function SearchClient({ products, categories }: Props) {
           </div>
           <div className="mt-3 flex flex-wrap gap-3 text-sm text-ink-700">
             <label className="flex items-center gap-2"><input type="checkbox" checked={vegOnly} onChange={(event) => setVegOnly(event.target.checked)} /> Veg only</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={gingerGarlic} onChange={(event) => setGingerGarlic(event.target.checked)} /> Contains ginger-garlic</label>
-            <label className="flex items-center gap-2"><input type="checkbox" checked={tamarind} onChange={(event) => setTamarind(event.target.checked)} /> Contains tamarind</label>
           </div>
         </div>
 

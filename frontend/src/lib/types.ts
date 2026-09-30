@@ -9,6 +9,7 @@ export type Category = {
 export type ProductImage = {
   id: string;
   url: string;
+  object_key?: string | null;
   alt_text: string;
   sort_order: number;
   image_type: string;
@@ -39,14 +40,8 @@ export type Product = {
   categories: string[];
   dish_type?: string | null;
   is_veg?: boolean;
-  contains_ginger_garlic?: boolean;
-  contains_tamarind?: boolean;
   contains_salt?: boolean;
-  all_in_one?: boolean;
   net_weight?: string | null;
-  shelf_life?: string | null;
-  fssai_license?: string | null;
-  allergen_info?: string | null;
   meal_cost?: number | null;
   rating?: number | null;
   review_count?: number;

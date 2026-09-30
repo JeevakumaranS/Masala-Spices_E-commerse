@@ -42,6 +42,7 @@ export async function getProducts(category?: string): Promise<Product[]> {
   const payload = await fetchJson<{ items?: Product[] } | Product[]>(
     path,
     [],
+    false,
   );
   if (!payload) return [];
   return Array.isArray(payload) ? payload : (payload.items ?? []);
@@ -52,7 +53,18 @@ export async function getActiveOffers(): Promise<ActiveOffer[]> {
 }
 
 export async function getProduct(slug: string): Promise<Product | null> {
-  return fetchJson<Product>(`/api/products/${encodeURIComponent(slug)}`);
+  return fetchJson<Product>(`/api/products/${encodeURIComponent(slug)}`, null, false);
+}
+
+export type HeroImage = {
+  id: string;
+  url: string;
+  alt_text: string;
+  sort_order: number;
+};
+
+export async function getHeroImages(): Promise<HeroImage[]> {
+  return (await fetchJson<HeroImage[]>("/api/hero-images", [], false)) ?? [];
 }
 
 export async function getRecipes(): Promise<Recipe[]> {

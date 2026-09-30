@@ -32,6 +32,7 @@ type Props = {
   aspect?: string;
   sizes?: string;
   priority?: boolean;
+  preload?: boolean;
   wrapperClassName?: string;
   /** Classes applied to the <img> itself — use for hover zoom etc. */
   className?: string;
@@ -49,6 +50,7 @@ export function SmartImage({
   aspect = "aspect-[4/5]",
   sizes = "(max-width: 768px) 100vw, 33vw",
   priority = false,
+  preload = false,
   wrapperClassName,
   className,
   zoom = false,
@@ -66,7 +68,9 @@ export function SmartImage({
           alt={alt}
           fill
           sizes={sizes}
-          priority={priority}
+          priority={preload ? undefined : priority}
+          preload={preload}
+          loading={preload ? undefined : priority ? "eager" : "lazy"}
           onLoad={() => setLoaded(true)}
           onError={() => {
             setFailed(true);

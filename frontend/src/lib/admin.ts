@@ -6,6 +6,15 @@ export type AdminProduct = Product & {
   variants: (Product["variants"][number] & { batch_no?: string | null })[];
 };
 
+export type AdminHeroImage = {
+  id: string;
+  object_key: string;
+  url: string;
+  alt_text: string;
+  sort_order: number;
+  created_at: string;
+};
+
 export type AdminOrderItem = {
   product_id: string;
   variant_id?: string | null;
@@ -80,6 +89,19 @@ export type AnalyticsReport = {
   sales_by_dish_type: { name: string; revenue: number }[];
 };
 
+export type AdminOverviewResponse = {
+  data: {
+    products: AdminProduct[] | null;
+    categories: AdminCategory[] | null;
+    orders: AdminOrder[] | null;
+    coupons: AdminCoupon[] | null;
+    reviews: AdminReview[] | null;
+    hero_images: AdminHeroImage[] | null;
+    analytics: AnalyticsReport | null;
+  };
+  errors: Record<string, string>;
+};
+
 export type ProductInput = Omit<AdminProduct, "id" | "variants"> & {
   variants: Omit<AdminProduct["variants"][number], "id">[];
 };
@@ -118,6 +140,27 @@ export type AdminTwilioCredentials = {
   auth_token: string;
   sender_phone: string;
 };
+
+export async function uploadAdminHeroImage(
+  file: File,
+  altText: string,
+  token: string,
+): Promise<AdminHeroImage> {
+  const formData = new FormData();
+  formData.append("file", file);
+  formData.append("alt_text", altText);
+
+  try {
+    const response = await apiClient.post<AdminHeroImage>(
+      "/api/admin/hero-images",
+      formData,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, "Hero image upload failed."));
+  }
+}
 
 export async function revealAdminTwilioCredentials(
   token: string,
@@ -168,6 +211,14 @@ export async function adminRequest<T>(
   } catch (error) {
     throw new Error(getApiErrorMessage(error, "Admin request failed."));
   }
+}
+
+export function getAdminOverview(
+  token: string,
+  forceRefresh = false,
+): Promise<AdminOverviewResponse> {
+  const query = forceRefresh ? "?force_refresh=true" : "";
+  return adminRequest<AdminOverviewResponse>(`/api/admin/overview${query}`, token);
 }
 
 export async function adminLogin(email: string, password: string): Promise<string> {

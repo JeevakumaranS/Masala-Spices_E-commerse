@@ -1,5 +1,7 @@
 """Product and product-review routes."""
 
+import asyncio
+import logging
 from typing import Any
 from uuid import UUID
 
@@ -8,6 +10,7 @@ from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, products_table, reviews_table, variants_table
+from app.services.storage import get_file_url, get_object_key, object_exists
 from app.modules.products.schemas import (
     PaginatedProducts,
     Product,
@@ -17,6 +20,7 @@ from app.modules.products.schemas import (
 )
 
 router = APIRouter(prefix="/api/products", tags=["products"])
+logger = logging.getLogger(__name__)
 
 
 @router.get("", response_model=PaginatedProducts)
@@ -28,8 +32,6 @@ async def list_products(
     max_price: float | None = Query(default=None, ge=0),
     pack_size: str | None = Query(default=None),
     is_veg: bool | None = Query(default=None),
-    contains_ginger_garlic: bool | None = Query(default=None),
-    contains_tamarind: bool | None = Query(default=None),
     search: str | None = Query(default=None),
     page: int = 1,
     page_size: int = 12,
@@ -49,10 +51,6 @@ async def list_products(
         filtered = [item for item in filtered if float(item["price"]) <= max_price]
     if is_veg is not None:
         filtered = [item for item in filtered if item.get("is_veg", True) == is_veg]
-    if contains_ginger_garlic is not None:
-        filtered = [item for item in filtered if item.get("contains_ginger_garlic", False) == contains_ginger_garlic]
-    if contains_tamarind is not None:
-        filtered = [item for item in filtered if item.get("contains_tamarind", False) == contains_tamarind]
     if pack_size:
         variants = await db.execute(
             select(variants_table.c.product_id).where(variants_table.c.pack_size.ilike(f"%{pack_size}%"))
@@ -105,16 +103,29 @@ async def hydrate_products(db: AsyncSession, products: list[dict[str, Any]]) -> 
         product["variants"] = variants_by_product.get(product["id"], [])
         product["ingredients"] = product.get("ingredients") or []
         product["categories"] = product.get("categories") or []
-        product["images"] = [
-            {
-                "id": f"{product['id']}:{index}",
-                "url": image,
+        image_references = product.get("images") or []
+        product["images"] = []
+        for image in image_references:
+            object_key = get_object_key(image)
+            if (
+                object_key
+                and image != object_key
+                and not await asyncio.to_thread(object_exists, object_key)
+            ):
+                logger.warning(
+                    "Skipping legacy product image reference whose RustFS object is missing.",
+                    extra={"product_id": str(product["id"]), "object_key": object_key},
+                )
+                continue
+            sort_order = len(product["images"])
+            product["images"].append({
+                "id": f"{product['id']}:{sort_order}",
+                "url": await asyncio.to_thread(get_file_url, object_key) if object_key else image,
+                "object_key": object_key,
                 "alt_text": product["name"],
-                "sort_order": index,
-                "image_type": "pack_shot" if index == 0 else "gallery",
-            }
-            for index, image in enumerate(product.get("images") or [])
-        ]
+                "sort_order": sort_order,
+                "image_type": "pack_shot" if sort_order == 0 else "gallery",
+            })
     return products
 
 

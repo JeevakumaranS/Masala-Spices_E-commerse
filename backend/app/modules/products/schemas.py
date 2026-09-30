@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 class ProductImage(BaseModel):
     id: str
     url: str
+    object_key: str | None = None
     alt_text: str
     sort_order: int = 0
     image_type: str = "pack_shot"
@@ -41,8 +42,6 @@ class Product(BaseModel):
     categories: List[str] = Field(default_factory=list)
     dish_type: str | None = None
     is_veg: bool = True
-    contains_ginger_garlic: bool = False
-    contains_tamarind: bool = False
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

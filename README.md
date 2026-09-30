@@ -40,8 +40,10 @@ This folder name (`Masala&Spices_E-commerse`) contains an ampersand, which break
 
 For local development without Docker, run the backend from `backend/` with
 `.venv\Scripts\python.exe -m uvicorn app.main:app --port 8080`. The frontend
-defaults to `http://localhost:8080` for its API. The Docker Compose setup above
-uses port 8000 and configures the container frontend separately.
+defaults to `http://localhost:8080` for its API. Browser API requests go through
+the Next.js same-origin proxy; set `API_PROXY_TARGET` when the backend address
+reachable by the Next.js server differs from `NEXT_PUBLIC_API_URL`. The Docker
+Compose setup targets the backend container at `http://backend:8000`.
 
 ## ISR revalidation note
 

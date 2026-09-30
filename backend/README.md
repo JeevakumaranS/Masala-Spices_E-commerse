@@ -54,8 +54,14 @@ token. Admin passwords are stored as salted scrypt hashes; no admin
 credentials are hard-coded or stored in environment variables. The login
 endpoint is `POST /api/admin/login`; use its bearer token for every
 `/api/admin/*` data endpoint and the legacy `/api/analytics/summary` endpoint.
-Tokens expire after eight hours and are rejected when the corresponding
-administrator is inactive or no longer exists.
+Admin bearer tokens are signed HS256 JWTs. Their lifetime is controlled by
+`ACCESS_TOKEN_EXPIRE_MINUTES` (60 minutes by default) and they are rejected
+when the corresponding administrator is inactive or no longer exists.
+
+To create an administrator directly from the backend CLI, run
+`.venv\Scripts\python.exe -m app.cli create-admin`. The CLI prompts for the
+email and a password twice without echoing the password. Supply `--email
+admin@example.com` to skip the email prompt; password entry remains interactive.
 
 ## API smoke tests
 
@@ -114,8 +120,17 @@ non-cacheable reveal endpoint. Checkout requires the customer's email. Orders
 are saved before notifications are sent; provider failures are logged and
 reported as per-channel confirmation statuses without discarding the order.
 
+Homepage hero images are uploaded and managed from the admin panel's **Hero
+section**. `GET /api/hero-images` is public and supplies the homepage carousel;
+the authenticated `/api/admin/hero-images` endpoints list, upload, and remove
+slides. Apply the `hero_images` migration before using the section.
+
 | Method and path | Contract |
 | --- | --- |
+| `GET /api/hero-images` | Public ordered list of homepage hero images, including their RustFS URLs and alt text. |
+| `GET /api/admin/hero-images` | Authenticated hero image list. |
+| `POST /api/admin/hero-images` | Authenticated multipart upload with `file` and optional `alt_text`; returns the saved image. |
+| `DELETE /api/admin/hero-images/{image_id}` | Remove the hero image and its RustFS object; returns `204`. |
 | `GET /api/admin/products` | Product array; each product includes `variants` and `images`. |
 | `POST /api/admin/products` | Create and return a product. `PUT /api/admin/products/{id}` replaces its fields and variants. `DELETE` returns `204`. |
 | `GET /api/admin/categories` | Category array. `POST /api/admin/categories` creates; `PUT /api/admin/categories/{id}` updates; `DELETE` returns `204`. |

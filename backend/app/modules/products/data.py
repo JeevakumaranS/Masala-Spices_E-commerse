@@ -218,43 +218,31 @@ _catalog_metadata = {
     "sambar-masala": {
         "dish_type": "Sambar/Rasam",
         "is_veg": True,
-        "contains_ginger_garlic": False,
-        "contains_tamarind": True,
         "categories": ["masala-powders", "spice-blends", "tamil-nadu", "sambar-rasam", "bestsellers"],
     },
     "biriyani-masala": {
         "dish_type": "Biryani",
         "is_veg": True,
-        "contains_ginger_garlic": False,
-        "contains_tamarind": False,
         "categories": ["masala-powders", "spice-blends", "hyderabadi", "biryani", "bestsellers"],
     },
     "garam-masala": {
         "dish_type": "Kulambu/Curry",
         "is_veg": True,
-        "contains_ginger_garlic": False,
-        "contains_tamarind": False,
         "categories": ["masala-powders", "spice-blends", "north-indian", "kulambu-masalas", "new-launches"],
     },
     "rasam-podi": {
         "dish_type": "Podi/Idli-Dosa",
         "is_veg": True,
-        "contains_ginger_garlic": False,
-        "contains_tamarind": True,
         "categories": ["podis", "tamil-nadu", "sambar-rasam", "podis", "combos-packs"],
     },
     "chettinad-masala": {
         "dish_type": "Fry/Varuval",
         "is_veg": False,
-        "contains_ginger_garlic": True,
-        "contains_tamarind": False,
         "categories": ["spice-blends", "chettinad", "fry-varuval", "combos-packs"],
     },
     "pav-bhaji-masala": {
         "dish_type": "Fried Rice",
         "is_veg": True,
-        "contains_ginger_garlic": False,
-        "contains_tamarind": False,
         "categories": ["masala-powders", "spice-blends", "fried-rice", "new-launches"],
     },
 }

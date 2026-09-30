@@ -6,16 +6,19 @@ import {
   AdminCategory,
   AdminAccount,
   AdminCoupon,
+  AdminHeroImage,
   AdminOrder,
   AdminProduct,
   AdminReview,
   AdminIntegrationSettings,
+  AdminOverviewResponse,
   AdminRegistrationStatus,
   AnalyticsReport,
+  getAdminOverview,
   getAdminRegistrationStatus,
   adminLogin,
   adminRequest,
-  asItems,
+  uploadAdminHeroImage,
   revealAdminIntegrationApiKey,
   revealAdminTwilioCredentials,
   registerAdmin,
@@ -40,8 +43,10 @@ import {
   UtensilsIcon,
 } from "@/components/ui/icons";
 import { formatINR, formatShortINR } from "@/lib/format";
+import { uploadProductImage } from "@/services/uploadService";
+import { SmartImage } from "@/components/ui/SmartImage";
 
-type Section = "overview" | "orders" | "products" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
+type Section = "overview" | "orders" | "products" | "hero" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
 type OrderFilter = "all" | "placed" | "processing" | "shipped";
 type VariantDraft = {
   pack_size: string;
@@ -87,6 +92,7 @@ const NAV: { id: Section; label: string; Icon: typeof HomeIcon }[] = [
   { id: "overview", label: "Overview", Icon: HomeIcon },
   { id: "orders", label: "Orders", Icon: BagIcon },
   { id: "products", label: "Products", Icon: PackageIcon },
+  { id: "hero", label: "Hero section", Icon: HomeIcon },
   { id: "categories", label: "Categories", Icon: TagIcon },
   { id: "campaigns", label: "Combos & offers", Icon: FlameIcon },
   { id: "coupons", label: "Promotions", Icon: FlameIcon },
@@ -118,6 +124,7 @@ const EMPTY_ANALYTICS: AnalyticsReport = {
   sales_by_region: [],
   sales_by_dish_type: [],
 };
+const OVERVIEW_WIDGETS = ["products", "categories", "orders", "coupons", "reviews", "hero_images", "analytics"] as const;
 
 const fieldClass =
   "mt-1.5 w-full rounded-xl border border-paper-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 outline-none transition focus:border-masala-500 focus:ring-2 focus:ring-masala-500/15";
@@ -135,10 +142,6 @@ function amount(value: number | undefined) {
   return formatINR(value ?? 0);
 }
 
-function unwrap<T>(payload: T[] | { items?: T[] }) {
-  return asItems(payload);
-}
-
 function subscribeAdminSession(onChange: () => void) {
   window.addEventListener("masala-admin-session", onChange);
   return () => window.removeEventListener("masala-admin-session", onChange);
@@ -148,23 +151,79 @@ function getAdminSession() {
   return window.sessionStorage.getItem("masala-admin-token") ?? "";
 }
 
-async function fetchAllOrders(token: string) {
-  const orders: AdminOrder[] = [];
-  let offset = 0;
-  const pageSize = 500;
-  for (;;) {
-    const page = await adminRequest<AdminOrder[]>(`/api/admin/orders?limit=${pageSize}&offset=${offset}`, token);
-    orders.push(...page);
-    if (page.length < pageSize) return orders;
-    offset += page.length;
-  }
-}
-
 function EmptyPanel({ children }: { children: string }) {
   return (
     <div className="rounded-2xl border border-dashed border-paper-300 bg-white/70 px-5 py-12 text-center">
       <p className="font-display text-xl font-semibold text-ink-800">{children}</p>
       <p className="mt-1 text-sm text-ink-500">Nothing to show yet.</p>
+    </div>
+  );
+}
+
+function WidgetError({ message }: { message: string }) {
+  return (
+    <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">
+      {message}
+    </p>
+  );
+}
+
+function ImageUploadField({
+  id,
+  title,
+  hint,
+  file,
+  required = false,
+  className = "",
+  onChange,
+}: {
+  id: string;
+  title: string;
+  hint: string;
+  file: File | null;
+  required?: boolean;
+  className?: string;
+  onChange: (file: File | null) => void;
+}) {
+  const fileSize = file
+    ? file.size < 1024 * 1024
+      ? `${Math.max(1, Math.round(file.size / 1024))} KB`
+      : `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+    : "";
+
+  return (
+    <div className={className}>
+      <p className={labelClass}>{title}</p>
+      <input
+        id={id}
+        type="file"
+        accept="image/*"
+        required={required}
+        className="peer sr-only"
+        aria-describedby={`${id}-hint`}
+        onChange={(event) => onChange(event.currentTarget.files?.[0] ?? null)}
+      />
+      <label
+        htmlFor={id}
+        className="mt-1.5 flex min-h-24 cursor-pointer items-center justify-between gap-4 rounded-xl border border-dashed border-paper-300 bg-paper-50 px-4 py-3 transition hover:border-masala-400 hover:bg-masala-50/40 peer-focus-visible:ring-2 peer-focus-visible:ring-masala-500 peer-focus-visible:ring-offset-2"
+      >
+        <span className="flex min-w-0 items-center gap-3">
+          <span className="grid size-11 shrink-0 place-items-center rounded-xl bg-white text-masala-700 shadow-xs">
+            <PackageIcon className="size-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-sm font-semibold text-ink-800">
+              {file ? file.name : "Choose an image to upload"}
+            </span>
+            <span id={`${id}-hint`} className="mt-0.5 block truncate text-xs text-ink-500">
+              {file ? `Image file · ${fileSize}` : hint}
+            </span>
+          </span>
+        </span>
+        <span className="shrink-0 rounded-lg border border-paper-200 bg-white px-3 py-2 text-xs font-semibold text-ink-700 shadow-xs">
+          {file ? "Change" : "Browse"}
+        </span>
+      </label>
     </div>
   );
 }
@@ -218,11 +277,14 @@ export default function AdminDashboard() {
   const [section, setSection] = useState<Section>("overview");
   const [orderFilter, setOrderFilter] = useState<OrderFilter>("all");
   const [products, setProducts] = useState<AdminProduct[]>([]);
+  const [heroImages, setHeroImages] = useState<AdminHeroImage[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [coupons, setCoupons] = useState<AdminCoupon[]>([]);
   const [reviews, setReviews] = useState<AdminReview[]>([]);
   const [analytics, setAnalytics] = useState<AnalyticsReport>(EMPTY_ANALYTICS);
+  const [analyticsError, setAnalyticsError] = useState("");
+  const [overviewErrors, setOverviewErrors] = useState<Record<string, string>>({});
   const [integrationSettings, setIntegrationSettings] = useState<AdminIntegrationSettings | null>(null);
   const [smsApiKey, setSmsApiKey] = useState("");
   const [smsAccountSid, setSmsAccountSid] = useState("");
@@ -255,6 +317,9 @@ export default function AdminDashboard() {
   const [adminRegistrationError, setAdminRegistrationError] = useState("");
   const [adminRegistrationNotice, setAdminRegistrationNotice] = useState("");
   const [productEditor, setProductEditor] = useState<ProductDraft | null>(null);
+  const [selectedProductImage, setSelectedProductImage] = useState<File | null>(null);
+  const [selectedHeroImage, setSelectedHeroImage] = useState<File | null>(null);
+  const [heroImageAlt, setHeroImageAlt] = useState("");
   const [categoryEditor, setCategoryEditor] = useState<AdminCategory | null | "new">(null);
   const [couponEditor, setCouponEditor] = useState<AdminCoupon | null | "new">(null);
   const [couponKind, setCouponKind] = useState<AdminCoupon["kind"]>("percentage");
@@ -268,6 +333,7 @@ export default function AdminDashboard() {
   };
 
   useEffect(() => {
+    if (token) return;
     let cancelled = false;
     const timer = window.setTimeout(() => {
       void getAdminRegistrationStatus()
@@ -285,36 +351,37 @@ export default function AdminDashboard() {
       cancelled = true;
       window.clearTimeout(timer);
     };
-  }, []);
+  }, [token]);
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (forceRefresh = false) => {
     if (!token) return;
-    const tasks = await Promise.allSettled([
-      adminRequest<AdminProduct[] | { items?: AdminProduct[] }>("/api/admin/products", token),
-      adminRequest<AdminCategory[] | { items?: AdminCategory[] }>("/api/admin/categories", token),
-      fetchAllOrders(token),
-      adminRequest<AdminCoupon[] | { items?: AdminCoupon[] }>("/api/admin/coupons", token),
-      adminRequest<AdminReview[] | { items?: AdminReview[] }>("/api/admin/reviews", token),
-      adminRequest<AnalyticsReport>("/api/admin/analytics/summary", token),
-    ]);
+    let overviewResponse: AdminOverviewResponse | null = null;
+    let requestError = "";
+    try {
+      overviewResponse = await getAdminOverview(token, forceRefresh);
+    } catch (error) {
+      requestError = error instanceof Error ? error.message : "Unable to load overview data.";
+    }
 
-    const errors: string[] = [];
-    const setResult = <T,>(
-      result: PromiseSettledResult<T>,
-      setter: (value: T) => void,
-      label: string,
-    ) => {
-      if (result.status === "fulfilled") setter(result.value);
-      else errors.push(`${label}: ${result.reason instanceof Error ? result.reason.message : "Unable to load data"}`);
-    };
+    const nextErrors: Record<string, string> = {};
+    if (overviewResponse) {
+      const { data, errors } = overviewResponse;
+      setProducts(data.products ?? []);
+      setCategories(data.categories ?? []);
+      setOrders(data.orders ?? []);
+      setCoupons(data.coupons ?? []);
+      setReviews(data.reviews ?? []);
+      setHeroImages(data.hero_images ?? []);
+      setAnalytics(data.analytics ?? EMPTY_ANALYTICS);
+      setAnalyticsError(errors.analytics ?? "");
+      Object.assign(nextErrors, errors);
+    } else {
+      for (const widget of OVERVIEW_WIDGETS) nextErrors[widget] = requestError;
+      setAnalyticsError(requestError);
+    }
 
-    setResult(tasks[0], (payload) => setProducts(unwrap(payload)), "Products");
-    setResult(tasks[1], (payload) => setCategories(unwrap(payload)), "Categories");
-    setResult(tasks[2], setOrders, "Orders");
-    setResult(tasks[3], (payload) => setCoupons(unwrap(payload)), "Promotions");
-    setResult(tasks[4], (payload) => setReviews(unwrap(payload)), "Reviews");
-    setResult(tasks[5], setAnalytics, "Analytics");
-    setLoadErrors(errors);
+    setOverviewErrors(nextErrors);
+    setLoadErrors(Object.entries(nextErrors).map(([widget, error]) => `${widget}: ${error}`));
   }, [token]);
 
   useEffect(() => {
@@ -375,7 +442,7 @@ export default function AdminDashboard() {
     try {
       await action();
       setNotice(successMessage);
-      await refresh();
+      await refresh(true);
       return true;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The action could not be completed.");
@@ -613,6 +680,7 @@ export default function AdminDashboard() {
   }
 
   const openProduct = (product?: AdminProduct, combo = false) => {
+    setSelectedProductImage(null);
     setProductEditor(
       product
         ? {
@@ -627,7 +695,7 @@ export default function AdminDashboard() {
             price: String(product.price),
             mrp: String(product.mrp),
             spice_level: product.spice_level,
-            image_url: product.images.map((image) => image.url).join("\n"),
+            image_url: product.images.map((image) => image.object_key ?? image.url).join("\n"),
             variants: product.variants.map((variant) => ({
               pack_size: variant.pack_size,
               price: String(variant.price),
@@ -661,35 +729,72 @@ export default function AdminDashboard() {
     event.preventDefault();
     if (!productEditor) return;
     const editor = productEditor;
-    const payload = {
-      name: editor.name.trim(),
-      slug: editor.slug.trim(),
-      description: editor.description.trim(),
-      ingredients: editor.ingredients.split(",").map((value) => value.trim()).filter(Boolean),
-      categories: editor.categories.split(",").map((value) => value.trim()).filter(Boolean),
-      dish_type: editor.dish_type.trim() || null,
-      status: editor.status,
-      spice_level: editor.spice_level,
-      price: Number(editor.price),
-      mrp: Number(editor.mrp),
-      images: editor.image_url.split(/\r?\n/).map((url) => url.trim()).filter(Boolean),
-      variants: editor.variants.filter((variant) => variant.pack_size.trim()).map((variant) => ({
-        pack_size: variant.pack_size.trim(),
-        price: Number(variant.price),
-        mrp: Number(variant.mrp),
-        sku: variant.sku.trim(),
-        stock_qty: Number(variant.stock_qty),
-        batch_no: variant.batch_no.trim() || null,
-        expiry_date: variant.expiry_date || null,
-      })),
-    };
     const method = editor.id ? "PUT" : "POST";
     const url = editor.id ? `/api/admin/products/${editor.id}` : "/api/admin/products";
     const saved = await runAction(
-      () => adminRequest(url, token, { method, body: JSON.stringify(payload) }),
+      async () => {
+        const images = editor.image_url.split(/\r?\n/).map((imageUrl) => imageUrl.trim()).filter(Boolean);
+        const productId = editor.id ?? crypto.randomUUID();
+        if (selectedProductImage) {
+          const result = await uploadProductImage(selectedProductImage, productId);
+          if (images.length) images[0] = result.object_key;
+          else images.unshift(result.object_key);
+        }
+
+        const payload = {
+          id: productId,
+          name: editor.name.trim(),
+          slug: editor.slug.trim(),
+          description: editor.description.trim(),
+          ingredients: editor.ingredients.split(",").map((value) => value.trim()).filter(Boolean),
+          categories: editor.categories.split(",").map((value) => value.trim()).filter(Boolean),
+          dish_type: editor.dish_type.trim() || null,
+          status: editor.status,
+          spice_level: editor.spice_level,
+          price: Number(editor.price),
+          mrp: Number(editor.mrp),
+          images,
+          variants: editor.variants.filter((variant) => variant.pack_size.trim()).map((variant) => ({
+            pack_size: variant.pack_size.trim(),
+            price: Number(variant.price),
+            mrp: Number(variant.mrp),
+            sku: variant.sku.trim(),
+            stock_qty: Number(variant.stock_qty),
+            batch_no: variant.batch_no.trim() || null,
+            expiry_date: variant.expiry_date || null,
+          })),
+        };
+        await adminRequest(url, token, { method, body: JSON.stringify(payload) });
+      },
       editor.id ? "Product updated." : "Product created.",
     );
-    if (saved) setProductEditor(null);
+    if (saved) {
+      setProductEditor(null);
+      setSelectedProductImage(null);
+    }
+  };
+
+  const saveHeroImage = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!selectedHeroImage) return;
+    const form = event.currentTarget;
+    const saved = await runAction(
+      () => uploadAdminHeroImage(selectedHeroImage, heroImageAlt.trim(), token),
+      "Hero image created.",
+    );
+    if (saved) {
+      setSelectedHeroImage(null);
+      setHeroImageAlt("");
+      form.reset();
+    }
+  };
+
+  const removeHeroImage = async (image: AdminHeroImage) => {
+    if (!window.confirm("Remove this image from the homepage hero?")) return;
+    await runAction(
+      () => adminRequest(`/api/admin/hero-images/${image.id}`, token, { method: "DELETE" }),
+      "Hero image removed.",
+    );
   };
 
   const saveCategory = async (event: FormEvent<HTMLFormElement>) => {
@@ -803,7 +908,7 @@ export default function AdminDashboard() {
             : "";
       setNotice(`Order changes saved.${mailNotice}`);
       setActiveOrder(null);
-      await refresh();
+      await refresh(true);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Order changes could not be saved.");
     } finally {
@@ -909,7 +1014,7 @@ export default function AdminDashboard() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <button type="button" onClick={() => void refresh()} className={secondaryButton} disabled={busy}>
+            <button type="button" onClick={() => void refresh(true)} className={secondaryButton} disabled={busy}>
               <RefreshIcon className="size-4" />
               Refresh
             </button>
@@ -933,9 +1038,11 @@ export default function AdminDashboard() {
         {section === "overview" ? (
           <Overview
             analytics={analytics}
+            analyticsError={analyticsError}
             orders={orders}
             products={products}
             reviews={reviews}
+            errors={overviewErrors}
             onOpenOrders={() => navigateToSection("orders")}
             onSelectOrder={openOrder}
           />
@@ -1011,6 +1118,72 @@ export default function AdminDashboard() {
               if (!window.confirm(`Delete ${product.name}? This also removes its variants.`)) return;
               await runAction(() => adminRequest(`/api/admin/products/${product.id}`, token, { method: "DELETE" }), section === "campaigns" ? "Combo removed." : "Product removed.");
             }} />
+          </section>
+        ) : null}
+
+        {section === "hero" ? (
+          <section className="mt-7 space-y-6">
+            <div className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
+              <h2 className="font-display text-xl font-semibold text-ink-950">Homepage hero images</h2>
+              <p className="mt-1 text-sm text-ink-500">
+                Add images to the homepage carousel. New images appear after the existing slides.
+              </p>
+              <form onSubmit={saveHeroImage} className="mt-5 grid gap-4 sm:grid-cols-2">
+                <ImageUploadField
+                  id="hero-image-file"
+                  title="Hero image"
+                  hint="Select an image for the homepage carousel."
+                  file={selectedHeroImage}
+                  required
+                  className="sm:col-span-2"
+                  onChange={setSelectedHeroImage}
+                />
+                <label className={labelClass}>
+                  Image description (alt text)
+                  <input
+                    className={fieldClass}
+                    value={heroImageAlt}
+                    onChange={(event) => setHeroImageAlt(event.target.value)}
+                    placeholder="Freshly ground spice blends"
+                  />
+                </label>
+                <div className="sm:col-span-2">
+                  <button type="submit" className={primaryButton} disabled={busy || !selectedHeroImage}>
+                    <PlusIcon className="size-4" />
+                    {busy ? "Uploading…" : "Add hero image"}
+                  </button>
+                </div>
+              </form>
+            </div>
+            {heroImages.length ? (
+              <div className="grid gap-4 lg:grid-cols-2">
+                {heroImages.map((image, index) => (
+                  <article key={image.id} className="overflow-hidden rounded-2xl border border-paper-200 bg-white shadow-xs">
+                    <SmartImage
+                      src={image.url}
+                      alt={image.alt_text || `Homepage hero image ${index + 1}`}
+                      aspect="aspect-[2.76/1]"
+                      sizes="(max-width: 1024px) 100vw, 50vw"
+                    />
+                    <div className="flex items-center justify-between gap-3 p-4">
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-ink-900">Slide {index + 1}</p>
+                        <p className="truncate text-xs text-ink-500">{image.alt_text || "No image description"}</p>
+                      </div>
+                      <button
+                        type="button"
+                        className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50 disabled:opacity-50"
+                        aria-label={`Remove hero image ${index + 1}`}
+                        onClick={() => void removeHeroImage(image)}
+                        disabled={busy}
+                      >
+                        <TrashIcon className="size-4" />
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : <EmptyPanel>No hero images configured</EmptyPanel>}
           </section>
         ) : null}
 
@@ -1309,7 +1482,15 @@ export default function AdminDashboard() {
               <label className={labelClass}>Dish type<input className={fieldClass} placeholder="Sambar, biryani…" value={productEditor.dish_type} onChange={(event) => setProductEditor({ ...productEditor, dish_type: event.target.value })} /></label>
               <label className={labelClass}>Spice level<select className={fieldClass} value={productEditor.spice_level} onChange={(event) => setProductEditor({ ...productEditor, spice_level: event.target.value })}><option value="mild">Mild</option><option value="medium">Medium</option><option value="hot">Hot</option></select></label>
               <label className={labelClass}>Status<select className={fieldClass} value={productEditor.status} onChange={(event) => setProductEditor({ ...productEditor, status: event.target.value })}><option value="active">Active</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
-              <label className={`${labelClass} sm:col-span-2`}>Product image URLs (one per line)<textarea rows={2} className={fieldClass} placeholder={"https://…/front.webp\nhttps://…/back.webp"} value={productEditor.image_url} onChange={(event) => setProductEditor({ ...productEditor, image_url: event.target.value })} /></label>
+              <ImageUploadField
+                id="product-image-file"
+                title="Product image"
+                hint="Select an image to use as the product's main image."
+                file={selectedProductImage}
+                className="sm:col-span-2"
+                onChange={setSelectedProductImage}
+              />
+              <label className={`${labelClass} sm:col-span-2`}>Additional image URLs (one per line)<textarea rows={2} className={fieldClass} placeholder={"https://…/front.webp\nhttps://…/back.webp"} value={productEditor.image_url} onChange={(event) => setProductEditor({ ...productEditor, image_url: event.target.value })} /></label>
               <label className={`${labelClass} sm:col-span-2`}>Description<textarea required rows={3} className={fieldClass} value={productEditor.description} onChange={(event) => setProductEditor({ ...productEditor, description: event.target.value })} /></label>
               <label className={`${labelClass} sm:col-span-2`}>Ingredients (comma-separated)<input className={fieldClass} value={productEditor.ingredients} onChange={(event) => setProductEditor({ ...productEditor, ingredients: event.target.value })} /></label>
             </div>
@@ -1538,38 +1719,46 @@ export default function AdminDashboard() {
 
 function Overview({
   analytics,
+  analyticsError,
   orders,
   products,
   reviews,
+  errors,
   onOpenOrders,
   onSelectOrder,
 }: {
   analytics: AnalyticsReport;
+  analyticsError: string;
   orders: AdminOrder[];
   products: AdminProduct[];
   reviews: AdminReview[];
+  errors: Record<string, string>;
   onOpenOrders: () => void;
   onSelectOrder: (order: AdminOrder) => void;
 }) {
   const pending = orders.filter((order) => order.status === "placed" || order.status === "processing");
   const lowStock = products.flatMap((product) => product.variants).filter((variant) => variant.stock_qty <= 5).length;
   const kpis = [
-    { label: "Gross sales", value: formatShortINR(analytics.total_revenue), note: "From recorded orders", Icon: TagIcon },
-    { label: "Orders", value: String(analytics.orders_count), note: `${pending.length} need review`, Icon: BagIcon },
-    { label: "Average order", value: formatINR(analytics.avg_order_value), note: "Average basket value", Icon: TruckIcon },
-    { label: "Repeat purchase", value: `${(analytics.repeat_purchase_rate * 100).toFixed(1)}%`, note: "Returning customers", Icon: RefreshIcon },
+    { label: "Gross sales", value: formatShortINR(analytics.total_revenue), note: "From recorded orders", Icon: TagIcon, error: analyticsError },
+    { label: "Orders", value: String(analytics.orders_count), note: `${pending.length} need review`, Icon: BagIcon, error: errors.orders },
+    { label: "Average order", value: formatINR(analytics.avg_order_value), note: "Average basket value", Icon: TruckIcon, error: analyticsError },
+    { label: "Repeat purchase", value: `${(analytics.repeat_purchase_rate * 100).toFixed(1)}%`, note: "Returning customers", Icon: RefreshIcon, error: analyticsError },
   ];
 
   return (
     <div className="mt-7 space-y-6">
       <ul className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {kpis.map(({ label, value, note, Icon }) => (
+        {kpis.map(({ label, value, note, Icon, error }) => (
           <li key={label} className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
             <div className="flex items-center justify-between text-xs font-bold tracking-wider text-ink-500 uppercase">
               {label}<Icon className="size-4 text-masala-700" />
             </div>
-            <p className="mt-3 font-display text-3xl font-semibold text-ink-950">{value}</p>
-            <p className="mt-1 text-xs text-ink-400">{note}</p>
+            {error ? <div className="mt-3"><WidgetError message={error} /></div> : (
+              <>
+                <p className="mt-3 font-display text-3xl font-semibold text-ink-950">{value}</p>
+                <p className="mt-1 text-xs text-ink-400">{note}</p>
+              </>
+            )}
           </li>
         ))}
       </ul>
@@ -1579,7 +1768,7 @@ function Overview({
             <div><p className="eyebrow">Action needed</p><h2 className="mt-1 font-display text-xl font-semibold text-ink-950">Order review queue</h2></div>
             <button type="button" className="text-sm font-semibold text-masala-700 hover:text-masala-900" onClick={onOpenOrders}>All orders <ArrowRightIcon className="inline size-4" /></button>
           </div>
-          {pending.length ? (
+          {errors.orders ? <div className="mt-4"><WidgetError message={errors.orders} /></div> : pending.length ? (
             <div className="mt-4 divide-y divide-paper-100">
               {pending.slice(0, 5).map((order) => (
                 <button type="button" key={order.id} onClick={() => onSelectOrder(order)} className="flex w-full items-center justify-between gap-4 py-3 text-left hover:bg-paper-50">
@@ -1593,17 +1782,17 @@ function Overview({
         <section className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
           <p className="eyebrow">Inventory health</p><h2 className="mt-1 font-display text-xl font-semibold text-ink-950">Catalog at a glance</h2>
           <div className="mt-5 grid grid-cols-2 gap-3">
-            <div className="rounded-xl bg-paper-100 p-4"><p className="text-xs text-ink-500">Products</p><p className="mt-1 font-display text-2xl font-semibold">{products.length}</p></div>
-            <div className="rounded-xl bg-chili-50 p-4"><p className="text-xs text-chili-700">Low stock packs</p><p className="mt-1 font-display text-2xl font-semibold text-chili-700">{lowStock}</p></div>
-            <div className="rounded-xl bg-paper-100 p-4"><p className="text-xs text-ink-500">Reviews to moderate</p><p className="mt-1 font-display text-2xl font-semibold">{reviews.filter((review) => review.status === "pending").length}</p></div>
-            <div className="rounded-xl bg-paper-100 p-4"><p className="text-xs text-ink-500">Total pack sizes</p><p className="mt-1 font-display text-2xl font-semibold">{products.reduce((count, product) => count + product.variants.length, 0)}</p></div>
+            <div className="rounded-xl bg-paper-100 p-4"><p className="text-xs text-ink-500">Products</p>{errors.products ? <WidgetError message={errors.products} /> : <p className="mt-1 font-display text-2xl font-semibold">{products.length}</p>}</div>
+            <div className="rounded-xl bg-chili-50 p-4"><p className="text-xs text-chili-700">Low stock packs</p>{errors.products ? <WidgetError message={errors.products} /> : <p className="mt-1 font-display text-2xl font-semibold text-chili-700">{lowStock}</p>}</div>
+            <div className="rounded-xl bg-paper-100 p-4"><p className="text-xs text-ink-500">Reviews to moderate</p>{errors.reviews ? <WidgetError message={errors.reviews} /> : <p className="mt-1 font-display text-2xl font-semibold">{reviews.filter((review) => review.status === "pending").length}</p>}</div>
+            <div className="rounded-xl bg-paper-100 p-4"><p className="text-xs text-ink-500">Total pack sizes</p>{errors.products ? <WidgetError message={errors.products} /> : <p className="mt-1 font-display text-2xl font-semibold">{products.reduce((count, product) => count + product.variants.length, 0)}</p>}</div>
           </div>
         </section>
       </div>
       <div className="grid gap-5 lg:grid-cols-3">
-        <MiniBreakdown title="Sales by category" items={analytics.sales_by_category} />
-        <MiniBreakdown title="Sales by region" items={analytics.sales_by_region} />
-        <MiniBreakdown title="Top SKUs" items={analytics.top_skus.map((item) => ({ name: item.sku, revenue: item.revenue }))} />
+        <MiniBreakdown title="Sales by category" items={analytics.sales_by_category} error={analyticsError} />
+        <MiniBreakdown title="Sales by region" items={analytics.sales_by_region} error={analyticsError} />
+        <MiniBreakdown title="Top SKUs" items={analytics.top_skus.map((item) => ({ name: item.sku, revenue: item.revenue }))} error={analyticsError} />
       </div>
     </div>
   );
@@ -1674,12 +1863,20 @@ function ProductsTable({
   );
 }
 
-function MiniBreakdown({ title, items }: { title: string; items: { name: string; revenue: number }[] }) {
+function MiniBreakdown({
+  title,
+  items,
+  error,
+}: {
+  title: string;
+  items: { name: string; revenue: number }[];
+  error?: string;
+}) {
   const max = Math.max(1, ...items.map((item) => item.revenue));
   return (
     <section className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
       <h2 className="font-display text-lg font-semibold text-ink-950">{title}</h2>
-      {items.length ? <ul className="mt-4 space-y-3">{items.slice(0, 5).map((item) => (
+      {error ? <div className="mt-4"><WidgetError message={error} /></div> : items.length ? <ul className="mt-4 space-y-3">{items.slice(0, 5).map((item) => (
         <li key={item.name}>
           <div className="flex justify-between gap-3 text-xs"><span className="truncate text-ink-700">{item.name}</span><span className="shrink-0 font-semibold text-ink-900">{formatShortINR(item.revenue)}</span></div>
           <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-paper-100"><div className="h-full rounded-full bg-masala-500" style={{ width: `${Math.max(2, (item.revenue / max) * 100)}%` }} /></div>

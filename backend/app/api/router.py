@@ -2,7 +2,7 @@
 
 from fastapi import APIRouter
 
-from app.modules.admin.router import router as admin_router
+from app.modules.admin.router import hero_images_router, router as admin_router
 from app.modules.analytics.router import router as analytics_router
 from app.modules.analytics.router import admin_router as admin_analytics_router
 from app.modules.blog.router import router as blog_router
@@ -23,6 +23,7 @@ api_router.include_router(recipes_router)
 api_router.include_router(orders_router)
 api_router.include_router(coupons_router)
 api_router.include_router(admin_router)
+api_router.include_router(hero_images_router)
 api_router.include_router(admin_analytics_router)
 api_router.include_router(blog_router)
 api_router.include_router(stores_router)

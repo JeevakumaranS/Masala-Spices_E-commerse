@@ -3,13 +3,13 @@
 import base64
 import hashlib
 import hmac
-import json
 import os
 import secrets
-import time
+from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from jose import JWTError, jwt
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -17,6 +17,24 @@ from app.core.database import admin_users_table, get_db
 
 bearer = HTTPBearer(auto_error=False)
 _PASSWORD_SCRYPT_N = 2**14
+_JWT_ALGORITHM = "HS256"
+
+
+def _token_expiration_minutes() -> int:
+    raw_value = os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60")
+    try:
+        minutes = int(raw_value)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=503,
+            detail="ACCESS_TOKEN_EXPIRE_MINUTES must be a positive integer.",
+        ) from error
+    if minutes <= 0:
+        raise HTTPException(
+            status_code=503,
+            detail="ACCESS_TOKEN_EXPIRE_MINUTES must be a positive integer.",
+        )
+    return minutes
 
 
 def _secret() -> str:
@@ -69,11 +87,13 @@ def verify_password(password: str, encoded: str) -> bool:
 
 
 def issue_token(email: str) -> str:
-    payload = base64.urlsafe_b64encode(
-        json.dumps({"sub": email, "exp": int(time.time()) + 8 * 60 * 60}, separators=(",", ":")).encode()
-    ).rstrip(b"=")
-    signature = hmac.new(_secret().encode(), payload, hashlib.sha256).digest()
-    return payload.decode() + "." + base64.urlsafe_b64encode(signature).rstrip(b"=").decode()
+    now = datetime.now(timezone.utc)
+    payload = {
+        "sub": email.strip().casefold(),
+        "iat": now,
+        "exp": now + timedelta(minutes=_token_expiration_minutes()),
+    }
+    return jwt.encode(payload, _secret(), algorithm=_JWT_ALGORITHM)
 
 
 async def require_admin(
@@ -83,16 +103,15 @@ async def require_admin(
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise HTTPException(status_code=401, detail="Admin authentication required.")
     try:
-        encoded, signed = credentials.credentials.split(".", 1)
-        expected = base64.urlsafe_b64encode(
-            hmac.new(_secret().encode(), encoded.encode(), hashlib.sha256).digest()
-        ).rstrip(b"=").decode()
-        if not hmac.compare_digest(signed, expected):
-            raise ValueError
-        payload = json.loads(base64.urlsafe_b64decode(encoded + "=" * (-len(encoded) % 4)))
-        if int(payload.get("exp", 0)) <= int(time.time()):
-            raise ValueError
-        email = str(payload["sub"]).strip().casefold()
+        payload = jwt.decode(
+            credentials.credentials,
+            _secret(),
+            algorithms=[_JWT_ALGORITHM],
+        )
+        subject = payload.get("sub")
+        if not isinstance(subject, str) or not subject.strip():
+            raise ValueError("JWT subject is missing.")
+        email = subject.strip().casefold()
         result = await db.execute(
             select(admin_users_table.c.id).where(
                 admin_users_table.c.email == email,
@@ -104,5 +123,5 @@ async def require_admin(
         return email
     except HTTPException:
         raise
-    except (ValueError, KeyError, TypeError, json.JSONDecodeError):
+    except (JWTError, ValueError, TypeError):
         raise HTTPException(status_code=401, detail="Invalid or expired admin token.")

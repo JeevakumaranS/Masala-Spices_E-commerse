@@ -6,7 +6,7 @@ import { SectionHeading } from "@/components/ui/SectionHeading";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { HeroImageCarousel } from "@/components/HeroImageCarousel";
 import { SmartImage } from "@/components/ui/SmartImage";
-import { getActiveOffers, getCategories, getProducts, getRecipes } from "@/lib/api";
+import { getActiveOffers, getCategories, getHeroImages, getProducts, getRecipes } from "@/lib/api";
 import { formatINR } from "@/lib/format";
 import {
   ArrowRightIcon,
@@ -34,13 +34,16 @@ const CTA_LINKS = [
   { label: "FAQ", href: "/pages/faq" },
 ];
 
+export const dynamic = "force-dynamic";
+
 export default async function HomePage() {
-  const [categories, products, recipes, offers, comboProducts] = await Promise.all([
+  const [categories, products, recipes, offers, comboProducts, heroImages] = await Promise.all([
     getCategories(),
     getProducts(),
     getRecipes(),
     getActiveOffers(),
     getProducts("combos-packs"),
+    getHeroImages(),
   ]);
 
   const bestsellers = products.slice(0, 6);
@@ -56,12 +59,7 @@ export default async function HomePage() {
         <div className="grain">
           <div className="flex w-full justify-center">
             <HeroImageCarousel
-              images={products.flatMap((product) =>
-                product.images.map((image) => ({
-                  src: image.url,
-                  alt: image.alt_text,
-                })),
-              )}
+              images={heroImages.map((image) => ({ src: image.url, alt: image.alt_text }))}
             />
           </div>
         </div>

@@ -52,8 +52,6 @@ async def seed() -> None:
                         "images",
                         "dish_type",
                         "is_veg",
-                        "contains_ginger_garlic",
-                        "contains_tamarind",
                     )
                 }
             )

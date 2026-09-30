@@ -80,8 +80,6 @@ products_table = Table(
     Column("images", ARRAY(String)),
     Column("dish_type", String),
     Column("is_veg", Boolean),
-    Column("contains_ginger_garlic", Boolean),
-    Column("contains_tamarind", Boolean),
     Column("created_at", DateTime),
     Column("updated_at", DateTime),
 )
@@ -105,7 +103,7 @@ admin_users_table = Table(
     Column("email", String),
     Column("password_hash", String),
     Column("is_active", Boolean),
-    Column("created_at", DateTime),
+    Column("created_at", DateTime(timezone=True)),
 )
 admin_integration_settings_table = Table(
     "admin_integration_settings",
@@ -120,6 +118,15 @@ admin_integration_settings_table = Table(
     Column("email_sender_name", String),
     Column("email_sender_email", String),
     Column("updated_at", DateTime),
+)
+hero_images_table = Table(
+    "hero_images",
+    metadata,
+    Column("id", Uuid, primary_key=True, default=_uuid7_default),
+    Column("object_key", String, nullable=False, unique=True),
+    Column("alt_text", Text, nullable=False, default=""),
+    Column("sort_order", Integer, nullable=False, default=0),
+    Column("created_at", DateTime(timezone=True), nullable=False),
 )
 orders_table = Table(
     "orders",

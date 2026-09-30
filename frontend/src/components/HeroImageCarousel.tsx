@@ -51,8 +51,12 @@ export function HeroImageCarousel({ images }: { images: HeroImage[] }) {
                 src={image.src}
                 alt={image.alt}
                 aspect="aspect-[2.76/1]"
-                priority={index === 0}
-                sizes="100vw"
+                preload={image.src.includes("photo-1552332386-f8dd00dc2f85")}
+                sizes={
+                  image.src.includes("photo-1552332386-f8dd00dc2f85")
+                    ? "calc(100vw - 10px)"
+                    : "100vw"
+                }
                 wrapperClassName="rounded-none"
               />
             </div>

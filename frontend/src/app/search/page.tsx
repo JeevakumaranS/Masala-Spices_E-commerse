@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getCategories, getProducts } from "@/lib/api";
 import { SearchClient } from "./SearchClient";
 
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Search",

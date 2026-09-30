@@ -1,5 +1,9 @@
 """Admin authentication and protected catalog/order/campaign/review operations."""
 
+import asyncio
+import logging
+import time
+from collections.abc import Awaitable, Callable
 from datetime import date, datetime, timezone
 from decimal import Decimal
 from ipaddress import ip_address
@@ -7,10 +11,10 @@ import re
 from typing import Any, Literal
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials
 from pydantic import BaseModel, Field, field_validator, model_validator
-from sqlalchemy import delete, insert, select, text, update
+from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,15 +24,18 @@ from app.core.database import (
     categories_table,
     coupons_table,
     get_db,
+    hero_images_table,
     order_history_table,
     order_items_table,
     orders_table,
     products_table,
     reviews_table,
+    session_factory,
     variants_table,
 )
 from app.modules.admin.auth import bearer, hash_password, issue_token, require_admin, verify_password
-from app.modules.admin.schemas import LoginRequest, RegisterAdminRequest
+from app.modules.admin.schemas import AdminOverviewResponse, LoginRequest, RegisterAdminRequest
+from app.modules.analytics.router import analytics_summary
 from app.modules.notifications.brevo import send_order_status_email
 from app.modules.notifications.crypto import (
     InvalidToken,
@@ -39,8 +46,187 @@ from app.modules.orders.catalog import CatalogValidationError, quote_order_items
 from app.modules.orders.schemas import OrderItemInput
 from app.modules.orders.shipping import calculate_shipping
 from app.modules.products.router import hydrate_products
+from app.services.storage import delete_object, get_file_url, get_object_key, upload_file
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
+logger = logging.getLogger(__name__)
+hero_images_router = APIRouter(tags=["hero images"])
+_OVERVIEW_CACHE_SECONDS = 60
+_OVERVIEW_WIDGET_TIMEOUT_SECONDS = 5
+_overview_cache: dict[str, tuple[float, AdminOverviewResponse]] = {}
+
+
+async def _all_admin_orders(db: AsyncSession) -> list[dict[str, Any]]:
+    orders: list[dict[str, Any]] = []
+    offset = 0
+    page_size = 500
+    while True:
+        page = await admin_orders(limit=page_size, offset=offset, db=db)
+        orders.extend(page)
+        if len(page) < page_size:
+            return orders
+        offset += page_size
+
+
+async def _overview_reviews(db: AsyncSession) -> list[dict[str, Any]]:
+    return await admin_reviews(db=db)
+
+
+async def _load_overview_widget(
+    name: str,
+    loader: Callable[[AsyncSession], Awaitable[Any]],
+) -> tuple[str, Any | None, str | None]:
+    try:
+        async with session_factory() as db:
+            value = await asyncio.wait_for(
+                loader(db),
+                timeout=_OVERVIEW_WIDGET_TIMEOUT_SECONDS,
+            )
+        return name, value, None
+    except asyncio.TimeoutError:
+        logger.warning("Admin overview widget timed out.", extra={"widget": name})
+        return name, None, "Timed out while loading this widget."
+    except Exception:
+        logger.exception("Admin overview widget failed.", extra={"widget": name})
+        return name, None, "Unable to load this widget."
+
+
+@router.get("/overview", response_model=AdminOverviewResponse)
+async def admin_overview(
+    force_refresh: bool = Query(default=False),
+    admin_email: str = Depends(require_admin),
+) -> AdminOverviewResponse:
+    cached = _overview_cache.get(admin_email)
+    now = time.monotonic()
+    if not force_refresh and cached and now - cached[0] < _OVERVIEW_CACHE_SECONDS:
+        return cached[1]
+
+    tasks = (
+        _load_overview_widget("products", admin_products),
+        _load_overview_widget("categories", admin_categories),
+        _load_overview_widget("orders", _all_admin_orders),
+        _load_overview_widget("coupons", admin_coupons),
+        _load_overview_widget("reviews", _overview_reviews),
+        _load_overview_widget("hero_images", _list_hero_images),
+        _load_overview_widget("analytics", analytics_summary),
+    )
+    results = await asyncio.gather(*tasks)
+    response = AdminOverviewResponse(
+        data={
+            name: value
+            for name, value, _ in results
+        },
+        errors={name: error for name, _, error in results if error is not None},
+    )
+    _overview_cache[admin_email] = (time.monotonic(), response)
+    return response
+
+
+async def _hero_image_response(row: Any) -> dict[str, Any]:
+    image = dict(row)
+    image["url"] = await asyncio.to_thread(get_file_url, image["object_key"])
+    return image
+
+
+async def _list_hero_images(db: AsyncSession) -> list[dict[str, Any]]:
+    result = await db.execute(
+        select(hero_images_table).order_by(
+            hero_images_table.c.sort_order,
+            hero_images_table.c.created_at,
+            hero_images_table.c.id,
+        )
+    )
+    return await asyncio.gather(*(_hero_image_response(row) for row in result.mappings()))
+
+
+@hero_images_router.get("/api/hero-images")
+async def public_hero_images(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+    return await _list_hero_images(db)
+
+
+@router.get("/hero-images", dependencies=[Depends(require_admin)])
+async def admin_hero_images(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+    return await _list_hero_images(db)
+
+
+@router.post("/hero-images", status_code=201, dependencies=[Depends(require_admin)])
+async def create_hero_image(
+    file: UploadFile = File(...),
+    alt_text: str = Form(default=""),
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are allowed.")
+
+    extension = file.filename.rsplit(".", 1)[-1].lower() if file.filename and "." in file.filename else "img"
+    if not re.fullmatch(r"[a-z0-9]{1,10}", extension):
+        extension = "img"
+
+    image_id = uuid4()
+    object_key = f"hero/{image_id}/{uuid4().hex}.{extension}"
+    try:
+        upload_file(file.file, object_key, file.content_type)
+    except Exception as exc:
+        logger.exception("Homepage hero image upload to RustFS failed.")
+        raise HTTPException(
+            status_code=502,
+            detail="Hero image storage upload failed. Check the RustFS endpoint, credentials, and bucket configuration.",
+        ) from exc
+
+    try:
+        next_sort_order = await db.scalar(
+            select(func.coalesce(func.max(hero_images_table.c.sort_order), -1) + 1)
+        )
+        result = await db.execute(
+            insert(hero_images_table)
+            .values(
+                id=image_id,
+                object_key=object_key,
+                alt_text=alt_text.strip(),
+                sort_order=next_sort_order,
+                created_at=datetime.now(timezone.utc),
+            )
+            .returning(hero_images_table)
+        )
+        await db.commit()
+    except Exception:
+        await db.rollback()
+        logger.exception("Failed to save homepage hero image metadata.")
+        try:
+            delete_object(object_key)
+        except Exception:
+            logger.exception(
+                "Failed to clean up an unreferenced homepage hero image.",
+                extra={"object_key": object_key},
+            )
+        raise
+
+    return await _hero_image_response(result.mappings().one())
+
+
+@router.delete(
+    "/hero-images/{image_id}",
+    status_code=204,
+    dependencies=[Depends(require_admin)],
+)
+async def delete_hero_image(image_id: UUID, db: AsyncSession = Depends(get_db)) -> Response:
+    result = await db.execute(
+        select(hero_images_table.c.object_key).where(hero_images_table.c.id == image_id)
+    )
+    object_key = result.scalar_one_or_none()
+    if object_key is None:
+        raise HTTPException(status_code=404, detail="Hero image not found.")
+
+    await db.execute(delete(hero_images_table).where(hero_images_table.c.id == image_id))
+    await db.commit()
+    try:
+        delete_object(object_key)
+    except Exception:
+        logger.exception(
+            "Failed to delete removed homepage hero image from RustFS.",
+            extra={"image_id": str(image_id), "object_key": object_key},
+        )
+    return Response(status_code=204)
 
 
 class VariantInput(BaseModel):
@@ -55,6 +241,7 @@ class VariantInput(BaseModel):
 
 
 class ProductInput(BaseModel):
+    id: UUID | None = None
     name: str = Field(min_length=1, max_length=255)
     slug: str = Field(min_length=1, max_length=255)
     description: str = ""
@@ -69,8 +256,6 @@ class ProductInput(BaseModel):
     categories: list[str] = Field(default_factory=list)
     dish_type: str | None = None
     is_veg: bool = True
-    contains_ginger_garlic: bool = False
-    contains_tamarind: bool = False
 
 
 class CategoryInput(BaseModel):
@@ -503,10 +688,35 @@ async def list_admins(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]
 
 
 def _dump_product(payload: ProductInput) -> dict[str, Any]:
-    product = payload.model_dump(exclude={"variants"})
+    product = payload.model_dump(exclude={"id", "variants"})
     for field in ("ingredients", "images", "categories"):
         product[field] = product.get(field) or []
     return product
+
+
+def _delete_replaced_product_images(
+    product_id: UUID,
+    previous_images: list[str] | None,
+    current_images: list[str],
+) -> None:
+    retained_keys = {
+        key
+        for image in current_images
+        if (key := get_object_key(image)) is not None
+    }
+    previous_keys = {
+        key
+        for image in (previous_images or [])
+        if (key := get_object_key(image)) is not None
+    }
+    for object_key in previous_keys - retained_keys:
+        try:
+            delete_object(object_key)
+        except Exception:
+            logger.exception(
+                "Failed to delete replaced product image from RustFS.",
+                extra={"product_id": str(product_id), "object_key": object_key},
+            )
 
 
 def _coupon_payload(payload: CouponInput) -> dict[str, Any]:
@@ -675,6 +885,8 @@ async def admin_products(
 async def create_product(payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     try:
         values = _dump_product(payload)
+        if payload.id is not None:
+            values["id"] = payload.id
         values["created_at"] = datetime.now()
         values["updated_at"] = datetime.now()
         product_id = (await db.execute(insert(products_table).values(**values).returning(products_table.c.id))).scalar_one()
@@ -689,8 +901,11 @@ async def create_product(payload: ProductInput, db: AsyncSession = Depends(get_d
 @router.put("/products/{product_id}", dependencies=[Depends(require_admin)])
 async def update_product(product_id: UUID, payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     try:
-        exists = await db.execute(select(products_table.c.id).where(products_table.c.id == product_id))
-        if exists.scalar_one_or_none() is None:
+        existing = await db.execute(
+            select(products_table.c.id, products_table.c.images).where(products_table.c.id == product_id)
+        )
+        previous_product = existing.mappings().first()
+        if previous_product is None:
             raise HTTPException(status_code=404, detail="Product not found.")
         values = _dump_product(payload)
         values["updated_at"] = datetime.now()
@@ -699,6 +914,11 @@ async def update_product(product_id: UUID, payload: ProductInput, db: AsyncSessi
         await db.commit()
     except IntegrityError as exc:
         await _unique_error(db, exc)
+    _delete_replaced_product_images(
+        product_id,
+        previous_product["images"],
+        values["images"],
+    )
     result = await db.execute(select(products_table).where(products_table.c.id == product_id))
     return (await hydrate_products(db, [dict(result.mappings().one())]))[0]
 

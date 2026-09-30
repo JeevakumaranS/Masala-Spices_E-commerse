@@ -13,7 +13,7 @@ import { ProductPurchasePanel } from "./ProductPurchasePanel";
 import { ProductRecommendations } from "./ProductRecommendations";
 import { ProductReviews } from "./ProductReviews";
 
-export const revalidate = 600;
+export const dynamic = "force-dynamic";
 
 export async function generateMetadata({
   params,
@@ -179,14 +179,8 @@ export default async function ProductPage({
           <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
             {[
               ["Net weight", product.net_weight ?? product.variants[0]?.pack_size ?? "See pack selector"],
-              ["Shelf life", product.shelf_life ?? "Best before date on selected pack"],
               ["Spice level", product.spice_level],
-              ["Ginger-garlic", product.contains_ginger_garlic ? "Included" : "Not included"],
-              ["Tamarind", product.contains_tamarind ? "Included" : "Not included"],
               ["Salt", product.contains_salt ? "Included" : "Not included"],
-              ["All-in-1", product.all_in_one ? "Yes" : "No"],
-              ["FSSAI licence", product.fssai_license ?? "Batch label"],
-              ["Allergens", product.allergen_info ?? "None declared"],
             ].map(([label, value]) => (
               <div key={label} className="border-b border-paper-200 pb-3">
                 <dt className="text-xs font-bold tracking-[0.14em] text-ink-400 uppercase">{label}</dt>

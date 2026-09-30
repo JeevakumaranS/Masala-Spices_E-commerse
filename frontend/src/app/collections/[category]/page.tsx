@@ -9,7 +9,7 @@ import type { Product } from "@/lib/types";
 import { cn } from "@/lib/cn";
 import { LeafIcon } from "@/components/ui/icons";
 
-export const revalidate = 300;
+export const dynamic = "force-dynamic";
 
 /**
  * Metadata resolves before the HTML stream starts, so a bad slug returns a real
