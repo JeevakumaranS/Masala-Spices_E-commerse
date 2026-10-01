@@ -26,6 +26,19 @@ class ProductVariant(BaseModel):
     expiry_date: str | None = None
 
 
+class ComboCatalogProduct(BaseModel):
+    id: UUID
+    product_id: UUID
+    variant_id: UUID
+    name: str
+    sku: str
+    quantity: int
+    pack_size: str
+    price: float
+    mrp: float
+    stock_qty: int
+
+
 class Product(BaseModel):
     id: UUID
     name: str
@@ -37,7 +50,9 @@ class Product(BaseModel):
     discount_pct: int = 0
     spice_level: str = "mild"
     status: str = "active"
+    is_combo: bool = False
     variants: List[ProductVariant] = Field(default_factory=list)
+    combo_catalog_products: List[ComboCatalogProduct] = Field(default_factory=list)
     images: List[ProductImage] = Field(default_factory=list)
     categories: List[str] = Field(default_factory=list)
     dish_type: str | None = None
@@ -61,7 +76,8 @@ class ReviewSubmission(BaseModel):
 
 class ProductReview(BaseModel):
     id: UUID
-    product_id: UUID
+    product_id: UUID | None = None
+    combo_id: UUID | None = None
     reviewer_name: str
     rating: int
     comment: str
@@ -72,4 +88,5 @@ class ProductReview(BaseModel):
 class ReviewSubmissionResponse(BaseModel):
     status: str
     id: UUID
-    product_id: UUID
+    product_id: UUID | None = None
+    combo_id: UUID | None = None

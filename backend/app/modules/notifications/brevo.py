@@ -8,13 +8,13 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import admin_integration_settings_table
-from app.modules.notifications.crypto import InvalidToken, decrypt_integration_secret
+from app.core.database import notification_settings_table
 
 logger = logging.getLogger(__name__)
 
 EmailDeliveryStatus = Literal["sent", "failed", "disabled"]
 OrderEmailStatus = Literal["placed", "processing", "shipped", "delivered"]
+NewsletterEmailStatus = Literal["sent", "failed", "disabled"]
 _BREVO_TRANSACTIONAL_EMAIL_URL = "https://api.brevo.com/v3/smtp/email"
 
 
@@ -108,45 +108,137 @@ async def send_order_status_email(
     order: dict[str, Any],
     status: OrderEmailStatus,
 ) -> EmailDeliveryStatus:
+    customer_name = order.get("customer_name") or ""
+    return await _send_transactional_email(
+        db,
+        recipient=str(order["email"]),
+        recipient_name=str(customer_name),
+        subject=f"Order {order['order_number']} — {status.title()}",
+        html_content=_order_status_email_html(order, status),
+        description=f"{status} notification for order {order['order_number']}",
+    )
+
+
+def _newsletter_signup_html() -> str:
+    return (
+        "<!doctype html><html><body style=\"font-family:Arial,sans-serif;color:#302016\">"
+        "<h1>You’re on the Masala House list!</h1>"
+        "<p>Thanks for joining us. Look out for our weekly recipe and spice updates, "
+        "sent every Tuesday.</p>"
+        "<p>No spam — just what we ground this week and how to cook with it.</p>"
+        "<p>Thanks,<br />The Masala House kitchen</p>"
+        "</body></html>"
+    )
+
+
+def _brevo_error_details(
+    response: httpx.Response,
+    *,
+    recipient: str,
+    sender_email: str,
+) -> tuple[str, str]:
+    try:
+        payload = response.json()
+    except ValueError:
+        return "", ""
+
+    if not isinstance(payload, dict):
+        return "", ""
+
+    code = payload.get("code")
+    message = payload.get("message")
+    safe_code = code[:100] if isinstance(code, str) else ""
+    safe_message = message[:1000] if isinstance(message, str) else ""
+    for address in {recipient, sender_email}:
+        if address:
+            safe_message = safe_message.replace(address, "[redacted]")
+    return safe_code, safe_message
+
+
+async def send_newsletter_signup_email(
+    db: AsyncSession,
+    email: str,
+) -> NewsletterEmailStatus:
+    return await _send_transactional_email(
+        db,
+        recipient=email,
+        recipient_name="Newsletter subscriber",
+        subject="You’re on the Masala House list",
+        html_content=_newsletter_signup_html(),
+        description="newsletter signup confirmation",
+    )
+
+
+async def _send_transactional_email(
+    db: AsyncSession,
+    *,
+    recipient: str,
+    recipient_name: str,
+    subject: str,
+    html_content: str,
+    description: str,
+) -> EmailDeliveryStatus:
     result = await db.execute(
-        select(admin_integration_settings_table).limit(1)
+        select(notification_settings_table).limit(1)
     )
     settings = result.mappings().first()
     if settings is None or not settings["email_enabled"]:
+        logger.warning(
+            "Brevo %s was not attempted because email integration is disabled.",
+            description,
+        )
         return "disabled"
 
-    encrypted_api_key = settings["email_api_key_encrypted"]
+    api_key = settings["email_api_key"]
     sender_name = settings["email_sender_name"]
     sender_email = settings["email_sender_email"]
-    if not encrypted_api_key or not sender_name or not sender_email:
-        logger.error("Brevo order confirmation is enabled but its configuration is incomplete.")
+    if not api_key or not sender_name or not sender_email:
+        logger.error(
+            "Brevo %s was not attempted because its configuration is incomplete "
+            "(api_key=%s, sender_name=%s, sender_email=%s).",
+            description,
+            bool(api_key),
+            bool(sender_name),
+            bool(sender_email),
+        )
         return "failed"
 
     try:
-        api_key = decrypt_integration_secret(encrypted_api_key)
         async with httpx.AsyncClient(timeout=15.0) as client:
+            logger.info("Sending %s request to Brevo.", description)
             response = await client.post(
                 _BREVO_TRANSACTIONAL_EMAIL_URL,
                 headers={"api-key": api_key, "accept": "application/json"},
                 json={
                     "sender": {"name": sender_name, "email": sender_email},
-                    "to": [{"email": order["email"], "name": order["customer_name"]}],
-                    "subject": f"Order {order['order_number']} — {status.title()}",
-                    "htmlContent": _order_status_email_html(order, status),
+                    "to": [{
+                        "email": recipient,
+                        "name": recipient_name or "Customer",
+                    }],
+                    "subject": subject,
+                    "htmlContent": html_content,
                 },
             )
-            response.raise_for_status()
-    except (httpx.HTTPError, InvalidToken, UnicodeError):
+            if response.is_error:
+                error_code, error_message = _brevo_error_details(
+                    response,
+                    recipient=recipient,
+                    sender_email=sender_email,
+                )
+                logger.error(
+                    "Brevo rejected %s with HTTP %s (code=%s): %s",
+                    description,
+                    response.status_code,
+                    error_code or "unknown",
+                    error_message or "No error message returned.",
+                )
+                response.raise_for_status()
+    except httpx.HTTPError:
         logger.exception(
-            "Brevo failed to send %s notification for order %s.",
-            status,
-            order["order_number"],
+            "Brevo request failed for %s before a successful response.",
+            description,
         )
         return "failed"
 
-    logger.info(
-        "Brevo sent %s notification for order %s.",
-        status,
-        order["order_number"],
-    )
+    logger.info("Brevo sent %s.", description)
     return "sent"

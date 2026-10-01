@@ -1,10 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type FormEvent } from "react";
 import Link from "next/link";
 import { cn } from "@/lib/cn";
 import { formatINR } from "@/lib/format";
-import { calculatePromo } from "@/lib/promos";
+import { calculatePromo, validatePromoCode } from "@/lib/promos";
 import {
   getShippingDestination,
   INTERNATIONAL_CUSTOMS_NOTE,
@@ -35,10 +35,14 @@ export default function CheckoutPage() {
   const lines = useCartStore((s) => s.lines);
   const promoCode = useCartStore((s) => s.promoCode);
   const promoDiscount = useCartStore((s) => s.promoDiscount);
+  const setPromoCode = useCartStore((s) => s.setPromoCode);
   const deliveryMode = useCartStore((s) => s.deliveryMode);
   const destinationCountry = useCartStore((s) => s.destinationCountry);
   const hydrated = useCartHydrated();
   const [receipt, setReceipt] = useState<CheckoutReceipt | null>(null);
+  const [promoInput, setPromoInput] = useState("");
+  const [promoError, setPromoError] = useState<string | null>(null);
+  const [checkingPromo, setCheckingPromo] = useState(false);
 
   // After success the store is empty — keep showing what was actually ordered.
   const summaryLines = receipt ? receipt.lines : lines;
@@ -55,6 +59,37 @@ export default function CheckoutPage() {
   const savings = selectSavings(summaryLines);
   const qualifyingSubtotal = Math.max(0, subtotal - discount);
   const toFreeShipping = Math.max(0, FREE_SHIPPING_THRESHOLD - qualifyingSubtotal);
+
+  const applyPromo = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const code = promoInput.trim().toUpperCase();
+    if (!code) {
+      setPromoError("Enter a promo code, then press Apply.");
+      return;
+    }
+
+    setCheckingPromo(true);
+    setPromoError(null);
+    try {
+      const result = await validatePromoCode(code, summaryLines);
+      if (!result.valid) {
+        setPromoError(result.message ?? `“${code}” isn't valid for this bag.`);
+        return;
+      }
+      setPromoCode(result.code, result.discount, result.label);
+      setPromoInput(result.code);
+    } catch (error) {
+      setPromoError(error instanceof Error ? error.message : "We couldn't validate that code.");
+    } finally {
+      setCheckingPromo(false);
+    }
+  };
+
+  const removePromo = () => {
+    setPromoCode(null);
+    setPromoInput("");
+    setPromoError(null);
+  };
 
   return (
     <section className="shell py-14 md:py-20">
@@ -182,6 +217,57 @@ export default function CheckoutPage() {
                   </div>
                 ) : null}
               </div>
+
+              {!receipt ? (
+                <form
+                  onSubmit={applyPromo}
+                  noValidate
+                  className="mt-4 rounded-2xl border border-white/10 bg-white/[0.06] p-3.5"
+                >
+                  <label htmlFor="checkout-promo-code" className="mb-2 block text-xs font-semibold text-paper-200">
+                    Promo, coupon or offer code
+                  </label>
+                  <div className="flex gap-2">
+                    <input
+                      id="checkout-promo-code"
+                      className="min-w-0 flex-1 rounded-xl border border-white/15 bg-white/10 px-3 py-2.5 text-sm text-white outline-none placeholder:text-paper-400 focus:border-saffron-300 focus:ring-2 focus:ring-saffron-300/20"
+                      placeholder="Enter code"
+                      value={promoInput}
+                      onChange={(event) => {
+                        setPromoInput(event.target.value);
+                        if (promoError) setPromoError(null);
+                      }}
+                      aria-invalid={promoError ? true : undefined}
+                      aria-describedby={promoError ? "checkout-promo-error" : undefined}
+                    />
+                    <button
+                      type="submit"
+                      disabled={checkingPromo}
+                      className="shrink-0 rounded-xl bg-saffron-400 px-3.5 py-2.5 text-sm font-semibold text-ink-950 transition hover:bg-saffron-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {checkingPromo ? "Checking…" : "Apply"}
+                    </button>
+                  </div>
+                  {promoError ? (
+                    <p id="checkout-promo-error" role="alert" className="mt-2 text-xs font-medium text-chili-200">
+                      {promoError}
+                    </p>
+                  ) : promoCode && discount > 0 ? (
+                    <div className="mt-2 flex items-center justify-between gap-3 text-xs">
+                      <p className="font-semibold text-cardamom-300">
+                        {promoCode} applied — {formatINR(discount)} off
+                      </p>
+                      <button
+                        type="button"
+                        onClick={removePromo}
+                        className="font-semibold text-paper-300 underline underline-offset-2 transition hover:text-white"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ) : null}
+                </form>
+              ) : null}
 
               {savings > 0 ? (
                 <p className="mt-3 text-xs font-medium text-cardamom-400">

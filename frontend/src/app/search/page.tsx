@@ -14,7 +14,7 @@ export default async function SearchPage() {
   const [products, categories] = await Promise.all([getProducts(), getCategories()]);
 
   return (
-    <section className="shell py-14 md:py-20">
+    <section className="shell py-8 md:py-10">
       <SearchClient products={products} categories={categories} />
     </section>
   );

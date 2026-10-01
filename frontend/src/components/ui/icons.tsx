@@ -172,6 +172,14 @@ export const ShieldIcon = (p: IconProps) => (
   </Base>
 );
 
+export const LogOutIcon = (p: IconProps) => (
+  <Base {...p}>
+    <path d="M10 17l5-5-5-5" />
+    <path d="M15 12H3" />
+    <path d="M12 3h6a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-6" />
+  </Base>
+);
+
 export const EyeIcon = (p: IconProps) => (
   <Base {...p}>
     <path d="M2.5 12s3.3-6 9.5-6 9.5 6 9.5 6-3.3 6-9.5 6-9.5-6-9.5-6Z" />

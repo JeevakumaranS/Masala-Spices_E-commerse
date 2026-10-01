@@ -2,13 +2,15 @@
 
 import { useState } from "react";
 import { ArrowRightIcon, CheckIcon } from "@/components/ui/icons";
+import { apiClient, getApiErrorMessage } from "@/lib/http";
 
 export function NewsletterForm({ tone = "dark" }: { tone?: "dark" | "light" | "footer" }) {
   const [email, setEmail] = useState("");
   const [done, setDone] = useState(false);
   const [error, setError] = useState("");
+  const [submitting, setSubmitting] = useState(false);
 
-  const submit = (event: React.FormEvent<HTMLFormElement>) => {
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const valid = /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email.trim());
 
@@ -18,7 +20,15 @@ export function NewsletterForm({ tone = "dark" }: { tone?: "dark" | "light" | "f
     }
 
     setError("");
-    setDone(true);
+    setSubmitting(true);
+    try {
+      await apiClient.post("/api/updates", { email: email.trim() });
+      setDone(true);
+    } catch (submitError) {
+      setError(getApiErrorMessage(submitError, "We couldn't save your email. Please try again."));
+    } finally {
+      setSubmitting(false);
+    }
   };
 
   const dark = tone === "dark";
@@ -63,6 +73,7 @@ export function NewsletterForm({ tone = "dark" }: { tone?: "dark" | "light" | "f
           placeholder="you@example.com"
           aria-invalid={Boolean(error)}
           aria-describedby={error ? "newsletter-error" : undefined}
+          disabled={submitting}
           className={
             dark
               ? "w-full rounded-full border border-white/15 bg-white/10 py-3.5 pr-32 pl-5 text-sm text-paper-50 placeholder:text-paper-300/70 focus:border-saffron-400 focus:bg-white/15 focus:outline-none"
@@ -80,8 +91,9 @@ export function NewsletterForm({ tone = "dark" }: { tone?: "dark" | "light" | "f
                 ? "btn btn-sm absolute top-1/2 right-1.5 -translate-y-1/2 border-[#E1662F] bg-[#E1662F] text-white hover:border-[#FFA469] hover:bg-[#FFA469]"
                 : "btn btn-primary btn-sm absolute top-1/2 right-1.5 -translate-y-1/2"
           }
+          disabled={submitting}
         >
-          Join
+          {submitting ? "Joining…" : "Join"}
           <ArrowRightIcon className="size-4" />
         </button>
       </div>

@@ -1,5 +1,6 @@
 """Recipe routes."""
 
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -8,8 +9,22 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, recipes_table
 from app.modules.recipes.schemas import PaginatedRecipes, Recipe
+from app.services.storage import get_file_url, object_exists
 
 router = APIRouter(prefix="/api/recipes", tags=["recipes"])
+
+
+async def _recipe_response(recipe: dict[str, Any]) -> dict[str, Any]:
+    image_reference = recipe["hero_image_url"]
+    if image_reference.startswith("homepage/"):
+        recipe["hero_image_key"] = image_reference
+        if not await asyncio.to_thread(object_exists, image_reference):
+            raise HTTPException(
+                status_code=502,
+                detail="A recipe photo is missing from RustFS. Upload that photo again.",
+            )
+        recipe["hero_image_url"] = await asyncio.to_thread(get_file_url, image_reference)
+    return recipe
 
 
 @router.get("", response_model=PaginatedRecipes)
@@ -30,7 +45,7 @@ async def list_recipes(
             if item["dish_type"].lower() == dish_type.lower()
         ]
     return {
-        "items": filtered,
+        "items": [await _recipe_response(item) for item in filtered],
         "page": 1,
         "page_size": len(filtered),
         "total_count": len(filtered),
@@ -43,4 +58,4 @@ async def get_recipe(slug: str, db: AsyncSession = Depends(get_db)) -> dict[str,
     recipe = result.mappings().first()
     if not recipe:
         raise HTTPException(status_code=404, detail="Recipe not found")
-    return dict(recipe)
+    return await _recipe_response(dict(recipe))

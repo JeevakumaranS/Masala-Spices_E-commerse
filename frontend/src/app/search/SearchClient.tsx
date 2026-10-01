@@ -32,6 +32,7 @@ const QUICK_LINKS = [
 
 const DISH_TYPES = ["Biryani", "Fried Rice", "Kulambu/Curry", "Fry/Varuval", "Sambar/Rasam", "Podi/Idli-Dosa"];
 const SPICE_LEVELS = ["mild", "medium", "hot"];
+const PAGE_SIZE = 12;
 
 function editDistance(left: string, right: string): number {
   const row = Array.from({ length: right.length + 1 }, (_, index) => index);
@@ -65,6 +66,75 @@ const chipClass = (active: boolean) =>
       : "!bg-white hover:!border-masala-200 hover:!bg-masala-50 hover:!text-masala-700",
   );
 
+function Pagination({
+  page,
+  pageSize,
+  total,
+  onPageChange,
+}: {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+}) {
+  const pageCount = Math.ceil(total / pageSize);
+  if (pageCount <= 1) return null;
+
+  const start = (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  const pages = new Set<number>([1, pageCount]);
+  for (let candidate = Math.max(1, page - 1); candidate <= Math.min(pageCount, page + 1); candidate += 1) {
+    pages.add(candidate);
+  }
+  const visiblePages = [...pages].sort((left, right) => left - right);
+
+  return (
+    <nav aria-label="Search results pagination" className="mt-6 flex flex-col gap-3 border-t border-paper-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-ink-500" aria-live="polite">
+        Showing {start}–{end} of {total} blends
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          className="rounded-lg border border-paper-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700 transition hover:border-masala-300 disabled:cursor-not-allowed disabled:opacity-45"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+        >
+          Previous
+        </button>
+        {visiblePages.map((currentPage, index) => (
+          <span key={currentPage} className="contents">
+            {index > 0 && currentPage - visiblePages[index - 1] > 1 ? (
+              <span className="px-1 text-sm text-ink-400" aria-hidden="true">…</span>
+            ) : null}
+            <button
+              type="button"
+              className={`size-9 rounded-lg border text-sm font-semibold transition ${
+                currentPage === page
+                  ? "border-masala-700 bg-masala-700 text-white"
+                  : "border-paper-200 bg-white text-ink-700 hover:border-masala-300"
+              }`}
+              aria-label={`Page ${currentPage}`}
+              aria-current={currentPage === page ? "page" : undefined}
+              onClick={() => onPageChange(currentPage)}
+            >
+              {currentPage}
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          className="rounded-lg border border-paper-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700 transition hover:border-masala-300 disabled:cursor-not-allowed disabled:opacity-45"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= pageCount}
+        >
+          Next
+        </button>
+      </div>
+    </nav>
+  );
+}
+
 /**
  * The interactive half of `/search`: text query + category chips filter the
  * server-fetched catalogue client-side, with a live result count.
@@ -77,6 +147,7 @@ export function SearchClient({ products, categories }: Props) {
   const [priceBand, setPriceBand] = useState<string | null>(null);
   const [packSize, setPackSize] = useState<string | null>(null);
   const [vegOnly, setVegOnly] = useState(false);
+  const [page, setPage] = useState(1);
 
   const results = useMemo(() => {
     const needle = query.trim().toLowerCase();
@@ -95,10 +166,14 @@ export function SearchClient({ products, categories }: Props) {
     });
   }, [products, query, category, spiceLevel, dishType, priceBand, packSize, vegOnly]);
 
+  const pageCount = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleResults = results.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const activeCategory = categories.find((item) => item.slug === category) ?? null;
   const hasFilters = query.trim().length > 0 || category !== null || spiceLevel !== null || dishType !== null || priceBand !== null || packSize !== null || vegOnly;
 
   const clearFilters = () => {
+    setPage(1);
     setQuery("");
     setCategory(null);
     setSpiceLevel(null);
@@ -109,79 +184,94 @@ export function SearchClient({ products, categories }: Props) {
   };
 
   const applySearch = (term: string) => {
+    setPage(1);
     setQuery(term);
     setCategory(null);
   };
 
   return (
-    <div className="flex flex-col gap-8">
+    <div className="flex flex-col gap-6">
       {/* ------------------------ Search field ------------------------ */}
-      <div className="card p-5 shadow-sm md:p-6">
-        <label className="field-label" htmlFor="search-products">
-          Search products
-        </label>
-        <div className="relative">
-          <SearchIcon className="pointer-events-none absolute top-1/2 left-4 size-5 -translate-y-1/2 text-masala-600" />
-          <input
-            id="search-products"
-            type="search"
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            placeholder="Try “sambar”, “biryani” or “chilli”…"
-            autoComplete="off"
-            className="input !py-4 !pl-12 !pr-11 text-base [&::-webkit-search-cancel-button]:hidden"
-          />
-          {query.length > 0 ? (
-            <button
-              type="button"
-              onClick={() => setQuery("")}
-              aria-label="Clear search"
-              className="btn btn-ghost btn-icon btn-sm absolute top-1/2 right-2 -translate-y-1/2"
-            >
-              <CloseIcon className="size-4" />
-            </button>
-          ) : null}
-
-          <div className="mt-5 grid gap-3 border-t border-paper-200 pt-5 sm:grid-cols-2 lg:grid-cols-4">
-            <select className="input" value={spiceLevel ?? ""} onChange={(event) => setSpiceLevel(event.target.value || null)} aria-label="Filter by spice level">
+      <div className="rounded-2xl border border-paper-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-center">
+          <div className="relative min-w-0 flex-1">
+            <SearchIcon className="pointer-events-none absolute top-1/2 left-3.5 size-4 -translate-y-1/2 text-masala-600" />
+            <input
+              id="search-products"
+              type="search"
+              value={query}
+              onChange={(event) => {
+                setPage(1);
+                setQuery(event.target.value);
+              }}
+              placeholder="Search products, ingredients or dishes"
+              autoComplete="off"
+              aria-label="Search products"
+              className="input !mt-0 !py-3 !pl-10 !pr-10 text-sm [&::-webkit-search-cancel-button]:hidden"
+            />
+            {query.length > 0 ? (
+              <button
+                type="button"
+                onClick={() => {
+                  setPage(1);
+                  setQuery("");
+                }}
+                aria-label="Clear search"
+                className="absolute top-1/2 right-2 grid size-8 -translate-y-1/2 place-items-center rounded-lg text-ink-400 transition hover:bg-paper-100 hover:text-ink-700"
+              >
+                <CloseIcon className="size-4" />
+              </button>
+            ) : null}
+          </div>
+          <div className="grid grid-cols-2 gap-2 md:w-[min(100%,34rem)] md:grid-cols-4">
+            <select className="input !mt-0 !py-2.5 text-sm" value={spiceLevel ?? ""} onChange={(event) => { setPage(1); setSpiceLevel(event.target.value || null); }} aria-label="Filter by spice level">
               <option value="">All spice levels</option>
               {SPICE_LEVELS.map((level) => <option key={level} value={level}>{level[0].toUpperCase() + level.slice(1)}</option>)}
             </select>
-            <select className="input" value={dishType ?? ""} onChange={(event) => setDishType(event.target.value || null)} aria-label="Filter by dish type">
+            <select className="input !mt-0 !py-2.5 text-sm" value={dishType ?? ""} onChange={(event) => { setPage(1); setDishType(event.target.value || null); }} aria-label="Filter by dish type">
               <option value="">All dish types</option>
               {DISH_TYPES.map((dish) => <option key={dish} value={dish}>{dish}</option>)}
             </select>
-            <select className="input" value={priceBand ?? ""} onChange={(event) => setPriceBand(event.target.value || null)} aria-label="Filter by price">
+            <select className="input !mt-0 !py-2.5 text-sm" value={priceBand ?? ""} onChange={(event) => { setPage(1); setPriceBand(event.target.value || null); }} aria-label="Filter by price">
               <option value="">All prices</option>
               <option value="under-200">Under ₹200</option>
               <option value="200-300">₹200–₹300</option>
               <option value="over-300">Over ₹300</option>
             </select>
-            <select className="input" value={packSize ?? ""} onChange={(event) => setPackSize(event.target.value || null)} aria-label="Filter by pack size">
+            <select className="input !mt-0 !py-2.5 text-sm" value={packSize ?? ""} onChange={(event) => { setPage(1); setPackSize(event.target.value || null); }} aria-label="Filter by pack size">
               <option value="">All pack sizes</option>
               {Array.from(new Set(products.flatMap((product) => product.variants.map((variant) => variant.pack_size)))).map((size) => <option key={size} value={size}>{size}</option>)}
             </select>
           </div>
-          <div className="mt-3 flex flex-wrap gap-3 text-sm text-ink-700">
-            <label className="flex items-center gap-2"><input type="checkbox" checked={vegOnly} onChange={(event) => setVegOnly(event.target.checked)} /> Veg only</label>
-          </div>
         </div>
-
-        {products.length > 0 ? (
-          <div className="mt-5 flex flex-wrap items-center gap-2">
-            <span className="eyebrow mr-1">Popular searches</span>
-            {POPULAR_SEARCHES.map((term) => (
-              <button
-                key={term}
-                type="button"
-                onClick={() => applySearch(term)}
-                className="chip transition hover:!border-masala-200 hover:!bg-masala-50 hover:!text-masala-700"
-              >
-                {term}
-              </button>
-            ))}
+        <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-paper-100 pt-3">
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+            {products.length > 0 ? (
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span className="mr-1 text-[0.65rem] font-bold tracking-[0.12em] text-ink-400 uppercase">Popular</span>
+                {POPULAR_SEARCHES.slice(0, 4).map((term) => (
+                  <button
+                    key={term}
+                    type="button"
+                    onClick={() => applySearch(term)}
+                    className="rounded-full border border-paper-200 bg-paper-50 px-2.5 py-1 text-xs font-medium text-ink-600 transition hover:border-masala-200 hover:bg-masala-50 hover:text-masala-700"
+                  >
+                    {term}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+            <label className="flex items-center gap-2 text-xs font-medium text-ink-600">
+              <input type="checkbox" checked={vegOnly} onChange={(event) => { setPage(1); setVegOnly(event.target.checked); }} />
+              Veg only
+            </label>
           </div>
-        ) : null}
+          {hasFilters ? (
+            <button type="button" onClick={clearFilters} className="text-xs font-semibold text-masala-700 hover:text-masala-900">
+              Clear filters
+            </button>
+          ) : null}
+        </div>
       </div>
 
       {/* ------------------------ Filter toolbar ------------------------ */}
@@ -193,7 +283,10 @@ export function SearchClient({ products, categories }: Props) {
                 <button
                   type="button"
                   aria-pressed={category === null}
-                  onClick={() => setCategory(null)}
+                  onClick={() => {
+                    setPage(1);
+                    setCategory(null);
+                  }}
                   className={chipClass(category === null)}
                 >
                   All blends
@@ -204,9 +297,10 @@ export function SearchClient({ products, categories }: Props) {
                   <button
                     type="button"
                     aria-pressed={category === item.slug}
-                    onClick={() =>
-                      setCategory(category === item.slug ? null : item.slug)
-                    }
+                    onClick={() => {
+                      setPage(1);
+                      setCategory(category === item.slug ? null : item.slug);
+                    }}
                     className={chipClass(category === item.slug)}
                   >
                     {item.name}
@@ -284,13 +378,21 @@ export function SearchClient({ products, categories }: Props) {
         </div>
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
-          {results.map((product, index) => (
+          {visibleResults.map((product, index) => (
             <Reveal key={product.id} delay={(index % 3) * 80} className="h-full">
               <ProductCard product={product} density="compact" className="h-full" />
             </Reveal>
           ))}
         </div>
       )}
+      {results.length > 0 ? (
+        <Pagination
+          page={currentPage}
+          pageSize={PAGE_SIZE}
+          total={results.length}
+          onPageChange={setPage}
+        />
+      ) : null}
 
       {/* ------------------------ Quick links ------------------------ */}
       <div className="hairline flex flex-wrap items-center gap-2 pt-6">

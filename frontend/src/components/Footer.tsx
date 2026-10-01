@@ -37,7 +37,6 @@ const COLUMNS = [
       { label: "About us", href: "/pages/about" },
       { label: "Contact", href: "/pages/contact" },
       { label: "Track order", href: "/order-status" },
-      { label: "Admin", href: "/admin" },
     ],
   },
 ];

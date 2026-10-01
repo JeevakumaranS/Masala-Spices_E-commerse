@@ -97,6 +97,18 @@ Brevo sends a status-specific customer email at order placement and on each
 subsequent status transition. Review submissions are pending moderation by
 default.
 
+Standard catalog entries are stored in `products`; discounted combo listings are
+stored separately in `combos`. A combo can include regular product variants,
+combo-only packs, or both. Regular variants are linked through
+`combo_catalog_products`, and their inventory remains in `product_variants`.
+Each `combo_products` row stores the name, pack size, SKU, price, MRP, and
+independent inventory for a combo-only pack, plus the quantity included in its
+combo. These packs are not regular catalog products. Public catalog responses
+combine products and combos, while order lines retain a snapshot of the combo or
+product purchased. Ordering a combo decrements stock in each included inventory
+source. The `20261011_combo_catalog_products` migration clears existing rows
+from `combo_products` before adding the regular-product relation.
+
 ## Admin API contracts
 
 All data endpoints below require `Authorization: Bearer <access_token>` and use
@@ -113,11 +125,13 @@ transactional email endpoint (`POST /v3/smtp/email`), not the campaigns
 endpoint. Configure a Brevo API v3 key and a sender identity verified in Brevo
 in the admin settings. SMS order confirmations use Twilio Programmable Messaging;
 configure the Account SID, Auth Token, and an SMS-capable sender phone in E.164
-format. Both providers' credentials are encrypted at rest with a key derived
-from `ADMIN_TOKEN_SECRET`; keep that secret stable or the stored credentials
-cannot be decrypted. Secrets are only revealed through the authenticated,
-non-cacheable reveal endpoint. Checkout requires the customer's email. Orders
-are saved before notifications are sent; provider failures are logged and
+format. Provider credentials are stored as plaintext in the `notification_settings`
+table, so restrict database and backup access appropriately. Migrating from
+older encrypted credentials requires the existing `ADMIN_TOKEN_SECRET` to
+decrypt them; the secret also remains required for admin authentication.
+Credentials are only revealed through the authenticated, non-cacheable reveal
+endpoint. Checkout requires the customer's email. Orders are saved before
+notifications are sent; provider failures are logged and
 reported as per-channel confirmation statuses without discarding the order.
 
 Homepage hero images are uploaded and managed from the admin panel's **Hero

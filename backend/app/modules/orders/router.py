@@ -9,6 +9,7 @@ from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import String, insert, select, text
+from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.common.phone import (
@@ -23,12 +24,13 @@ from app.core.database import (
     order_history_table,
     order_items_table,
     orders_table,
+    variants_table,
 )
 from app.modules.coupons.service import (
     CouponValidationError,
     calculate_managed_coupon,
 )
-from app.modules.orders.catalog import CatalogValidationError, quote_order_items
+from app.modules.orders.catalog import CatalogValidationError, QuotedOrderItem, quote_order_items
 from app.modules.orders.schemas import Order, OrderCreateRequest
 from app.modules.orders.shipping import (
     INTERNATIONAL_PACKAGING_NOTE,
@@ -41,6 +43,39 @@ from app.modules.notifications.brevo import send_order_confirmation_email
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
 
+async def _deduct_order_inventory(
+    db: AsyncSession,
+    items: list[QuotedOrderItem],
+) -> None:
+    required_variant_stock: dict[Any, int] = {}
+    for item in items:
+        if item.variant_id is not None:
+            required_variant_stock[item.variant_id] = (
+                required_variant_stock.get(item.variant_id, 0) + item.qty
+            )
+        for variant_id, component_quantity in item.catalog_component_requirements:
+            required_variant_stock[variant_id] = (
+                required_variant_stock.get(variant_id, 0) + item.qty * component_quantity
+            )
+    for variant_id, quantity in sorted(
+        required_variant_stock.items(),
+        key=lambda entry: str(entry[0]),
+    ):
+        updated = await db.execute(
+            update(variants_table)
+            .where(
+                variants_table.c.id == variant_id,
+                variants_table.c.stock_qty >= quantity,
+            )
+            .values(stock_qty=variants_table.c.stock_qty - quantity)
+            .returning(variants_table.c.id)
+        )
+        if updated.scalar_one_or_none() is None:
+            await db.rollback()
+            raise HTTPException(
+                status_code=422,
+                detail="Stock changed while placing your order. Please review your bag and try again.",
+            )
 @router.get("/shipping-options")
 def get_shipping_options() -> dict[str, Any]:
     return shipping_options_payload()
@@ -151,6 +186,8 @@ async def create_order(
             postal_code=payload.postal_code.strip(),
         ).returning(orders_table.c.id)
     )).scalar_one()
+
+    await _deduct_order_inventory(db, items)
 
     # Insert order items
     for item in items:

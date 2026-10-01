@@ -28,8 +28,14 @@ export function AddToCartButton({
   const [added, setAdded] = useState(false);
 
   const selected = variant ?? product.variants[0] ?? null;
-  const inStock = selected ? selected.stock_qty > 0 : true;
-  const maxQty = Math.max(1, Math.min(selected?.stock_qty ?? 20, 20));
+  const bundleStock = product.is_combo
+    ? product.combo_catalog_products.length
+      ? Math.min(...product.combo_catalog_products.map((item) => Math.floor(item.stock_qty / item.quantity)))
+      : 0
+    : null;
+  const availableStock = bundleStock ?? selected?.stock_qty ?? 20;
+  const inStock = availableStock > 0;
+  const maxQty = Math.max(1, Math.min(availableStock, 20));
 
   const handleAdd = () => {
     if (!inStock) return;

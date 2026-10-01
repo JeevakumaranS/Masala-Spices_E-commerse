@@ -88,6 +88,44 @@ def test_homepage_hero_image_routes_are_registered() -> None:
     assert "/api/admin/hero-images/{image_id}" in paths
 
 
+def test_homepage_management_routes_are_registered_and_protected(client: TestClient) -> None:
+    paths = set(create_app().openapi()["paths"])
+    assert "/api/homepage-content" in paths
+    assert "/api/admin/homepage-content" in paths
+    assert "/api/admin/homepage-media" in paths
+    assert "/api/admin/homepage-media/sync" in paths
+
+    assert client.get("/api/admin/homepage-content").status_code == 401
+    assert client.put("/api/admin/homepage-content", json={}).status_code == 401
+    assert client.post("/api/admin/homepage-media/sync").status_code == 401
+    assert client.post(
+        "/api/admin/homepage-media",
+        files={"file": ("homepage.jpg", b"image", "image/jpeg")},
+    ).status_code == 401
+
+
+def test_recipe_management_routes_are_registered_and_protected(client: TestClient) -> None:
+    paths = set(create_app().openapi()["paths"])
+    assert "/api/admin/recipes" in paths
+    assert "/api/admin/recipes/{recipe_id}" in paths
+
+    assert client.get("/api/admin/recipes").status_code == 401
+    assert client.post("/api/admin/recipes", json={}).status_code == 401
+    assert client.put(f"/api/admin/recipes/{uuid4()}", json={}).status_code == 401
+    assert client.delete(f"/api/admin/recipes/{uuid4()}").status_code == 401
+
+
+def test_combo_management_routes_are_registered_and_protected(client: TestClient) -> None:
+    paths = set(create_app().openapi()["paths"])
+    assert "/api/admin/combos" in paths
+    assert "/api/admin/combos/{combo_id}" in paths
+
+    assert client.get("/api/admin/combos").status_code == 401
+    assert client.post("/api/admin/combos", json={}).status_code == 401
+    assert client.put(f"/api/admin/combos/{uuid4()}", json={}).status_code == 401
+    assert client.delete(f"/api/admin/combos/{uuid4()}").status_code == 401
+
+
 def test_admin_hero_image_list_requires_authentication(client: TestClient) -> None:
     response = client.get("/api/admin/hero-images")
 
@@ -421,6 +459,18 @@ def test_public_collection_endpoints(
     payload = response.json()
     items = payload if items_key is None else payload[items_key]
     assert isinstance(items, list)
+
+
+def test_combo_catalog_allows_no_combo_only_packs_after_inventory_reset(client: TestClient) -> None:
+    combo_response = client.get("/api/products/double-damaka")
+    assert combo_response.status_code == 200, combo_response.text
+    combo = combo_response.json()
+    assert combo["is_combo"] is True
+    assert combo["combo_catalog_products"] == []
+
+    listing_response = client.get("/api/products?category=combos-packs")
+    assert listing_response.status_code == 200, listing_response.text
+    assert all(item["is_combo"] for item in listing_response.json()["items"])
 
 
 def test_active_coupon_listing_contains_only_public_offer_fields(

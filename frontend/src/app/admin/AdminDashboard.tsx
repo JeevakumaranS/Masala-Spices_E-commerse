@@ -18,11 +18,12 @@ import {
   getAdminRegistrationStatus,
   adminLogin,
   adminRequest,
-  uploadAdminHeroImage,
   revealAdminIntegrationApiKey,
   revealAdminTwilioCredentials,
   registerAdmin,
 } from "@/lib/admin";
+import { HomepageManagement } from "@/app/admin/HomepageManagement";
+import { RecipesManagement } from "@/app/admin/RecipesManagement";
 import {
   ArrowRightIcon,
   BagIcon,
@@ -31,6 +32,7 @@ import {
   EyeOffIcon,
   FlameIcon,
   HomeIcon,
+  LogOutIcon,
   PackageIcon,
   PlusIcon,
   RefreshIcon,
@@ -44,10 +46,15 @@ import {
 } from "@/components/ui/icons";
 import { formatINR, formatShortINR } from "@/lib/format";
 import { uploadProductImage } from "@/services/uploadService";
-import { SmartImage } from "@/components/ui/SmartImage";
 
-type Section = "overview" | "orders" | "products" | "hero" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
+type Section = "overview" | "orders" | "products" | "homepage" | "recipes" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
 type OrderFilter = "all" | "placed" | "processing" | "shipped";
+type PaginationProps = {
+  page: number;
+  pageSize: number;
+  total: number;
+  onPageChange: (page: number) => void;
+};
 type VariantDraft = {
   pack_size: string;
   price: string;
@@ -57,8 +64,14 @@ type VariantDraft = {
   batch_no: string;
   expiry_date: string;
 };
+type ComboCatalogProductDraft = {
+  product_id: string;
+  variant_id: string;
+  quantity: string;
+};
 type ProductDraft = {
   id?: string;
+  is_combo: boolean;
   name: string;
   slug: string;
   description: string;
@@ -71,6 +84,7 @@ type ProductDraft = {
   spice_level: string;
   image_url: string;
   variants: VariantDraft[];
+  combo_catalog_products: ComboCatalogProductDraft[];
 };
 type CouponDraft = {
   code: string;
@@ -92,7 +106,8 @@ const NAV: { id: Section; label: string; Icon: typeof HomeIcon }[] = [
   { id: "overview", label: "Overview", Icon: HomeIcon },
   { id: "orders", label: "Orders", Icon: BagIcon },
   { id: "products", label: "Products", Icon: PackageIcon },
-  { id: "hero", label: "Hero section", Icon: HomeIcon },
+  { id: "homepage", label: "Home page", Icon: HomeIcon },
+  { id: "recipes", label: "Recipes", Icon: UtensilsIcon },
   { id: "categories", label: "Categories", Icon: TagIcon },
   { id: "campaigns", label: "Combos & offers", Icon: FlameIcon },
   { id: "coupons", label: "Promotions", Icon: FlameIcon },
@@ -102,6 +117,7 @@ const NAV: { id: Section; label: string; Icon: typeof HomeIcon }[] = [
 ];
 
 const ORDER_STAGES: AdminOrder["status"][] = ["placed", "processing", "shipped", "delivered"];
+const ADMIN_PAGE_SIZE = 10;
 const ORDER_FILTERS: { id: OrderFilter; label: string }[] = [
   { id: "all", label: "All orders" },
   { id: "placed", label: "New orders" },
@@ -165,6 +181,63 @@ function WidgetError({ message }: { message: string }) {
     <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">
       {message}
     </p>
+  );
+}
+
+function Pagination({ page, pageSize, total, onPageChange }: PaginationProps) {
+  const pageCount = Math.max(1, Math.ceil(total / pageSize));
+  const start = total === 0 ? 0 : (page - 1) * pageSize + 1;
+  const end = Math.min(page * pageSize, total);
+  const pages = new Set<number>([1, pageCount]);
+  for (let candidate = Math.max(1, page - 1); candidate <= Math.min(pageCount, page + 1); candidate += 1) {
+    pages.add(candidate);
+  }
+  const visiblePages = [...pages].sort((left, right) => left - right);
+
+  return (
+    <nav aria-label="Pagination" className="mt-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+      <p className="text-sm text-ink-500" aria-live="polite">
+        Showing {start}–{end} of {total}
+      </p>
+      <div className="flex flex-wrap items-center gap-1.5">
+        <button
+          type="button"
+          className="rounded-lg border border-paper-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700 transition hover:border-masala-300 disabled:cursor-not-allowed disabled:opacity-45"
+          onClick={() => onPageChange(page - 1)}
+          disabled={page <= 1}
+        >
+          Previous
+        </button>
+        {visiblePages.map((currentPage, index) => (
+          <span key={currentPage} className="contents">
+            {index > 0 && currentPage - visiblePages[index - 1] > 1 ? (
+              <span className="px-1 text-sm text-ink-400" aria-hidden="true">…</span>
+            ) : null}
+            <button
+              type="button"
+              className={`size-9 rounded-lg border text-sm font-semibold transition ${
+                currentPage === page
+                  ? "border-masala-700 bg-masala-700 text-white"
+                  : "border-paper-200 bg-white text-ink-700 hover:border-masala-300"
+              }`}
+              aria-label={`Page ${currentPage}`}
+              aria-current={currentPage === page ? "page" : undefined}
+              onClick={() => onPageChange(currentPage)}
+            >
+              {currentPage}
+            </button>
+          </span>
+        ))}
+        <button
+          type="button"
+          className="rounded-lg border border-paper-200 bg-white px-3 py-2 text-sm font-semibold text-ink-700 transition hover:border-masala-300 disabled:cursor-not-allowed disabled:opacity-45"
+          onClick={() => onPageChange(page + 1)}
+          disabled={page >= pageCount}
+        >
+          Next
+        </button>
+      </div>
+    </nav>
   );
 }
 
@@ -276,6 +349,9 @@ export default function AdminDashboard() {
   const token = useSyncExternalStore(subscribeAdminSession, getAdminSession, () => "");
   const [section, setSection] = useState<Section>("overview");
   const [orderFilter, setOrderFilter] = useState<OrderFilter>("all");
+  const [ordersPage, setOrdersPage] = useState(1);
+  const [productsPage, setProductsPage] = useState(1);
+  const [reviewsPage, setReviewsPage] = useState(1);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [heroImages, setHeroImages] = useState<AdminHeroImage[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
@@ -318,14 +394,13 @@ export default function AdminDashboard() {
   const [adminRegistrationNotice, setAdminRegistrationNotice] = useState("");
   const [productEditor, setProductEditor] = useState<ProductDraft | null>(null);
   const [selectedProductImage, setSelectedProductImage] = useState<File | null>(null);
-  const [selectedHeroImage, setSelectedHeroImage] = useState<File | null>(null);
-  const [heroImageAlt, setHeroImageAlt] = useState("");
   const [categoryEditor, setCategoryEditor] = useState<AdminCategory | null | "new">(null);
   const [couponEditor, setCouponEditor] = useState<AdminCoupon | null | "new">(null);
   const [couponKind, setCouponKind] = useState<AdminCoupon["kind"]>("percentage");
   const [activeOrder, setActiveOrder] = useState<AdminOrder | null>(null);
   const [originalOrderStatus, setOriginalOrderStatus] = useState("");
   const [productToAdd, setProductToAdd] = useState("");
+  const [comboCatalogProductToAdd, setComboCatalogProductToAdd] = useState("");
 
   const navigateToSection = (nextSection: Section) => {
     setNotice("");
@@ -600,9 +675,30 @@ export default function AdminDashboard() {
       [product.name, product.slug, ...product.categories].join(" ").toLowerCase().includes(needle),
     );
   }, [products, search]);
-  const comboProducts = filteredProducts.filter((product) =>
-    product.categories.some((category) => /combo|pack/i.test(category)),
-  );
+  const comboProducts = filteredProducts.filter((product) => product.is_combo);
+  const regularProducts = products.filter((product) => !product.is_combo && product.status === "active");
+  const bundleRegularPrice = productEditor
+    ? productEditor.combo_catalog_products.reduce((sum, item) => {
+        const product = regularProducts.find((candidate) => candidate.id === item.product_id);
+        const variant = product?.variants.find((candidate) => candidate.id === item.variant_id);
+        return sum + (variant?.mrp ?? 0) * Number(item.quantity || 0);
+      }, 0)
+    : 0;
+  const roundedBundleRegularPrice = Math.round((bundleRegularPrice + Number.EPSILON) * 100) / 100;
+  const filteredOrders = useMemo(() => orders.filter((order) => {
+    const matchesFilter = orderFilter === "all" || order.status === orderFilter;
+    const matchesSearch = `${order.order_number} ${order.customer_name} ${order.phone} ${order.status}`
+      .toLowerCase()
+      .includes(search.toLowerCase());
+    return matchesFilter && matchesSearch;
+  }), [orders, orderFilter, search]);
+  const activeProducts = section === "campaigns" ? comboProducts : filteredProducts;
+  const currentOrdersPage = Math.min(ordersPage, Math.max(1, Math.ceil(filteredOrders.length / ADMIN_PAGE_SIZE)));
+  const currentProductsPage = Math.min(productsPage, Math.max(1, Math.ceil(activeProducts.length / ADMIN_PAGE_SIZE)));
+  const currentReviewsPage = Math.min(reviewsPage, Math.max(1, Math.ceil(reviews.length / ADMIN_PAGE_SIZE)));
+  const visibleOrders = filteredOrders.slice((currentOrdersPage - 1) * ADMIN_PAGE_SIZE, currentOrdersPage * ADMIN_PAGE_SIZE);
+  const visibleProducts = activeProducts.slice((currentProductsPage - 1) * ADMIN_PAGE_SIZE, currentProductsPage * ADMIN_PAGE_SIZE);
+  const visibleReviews = reviews.slice((currentReviewsPage - 1) * ADMIN_PAGE_SIZE, currentReviewsPage * ADMIN_PAGE_SIZE);
 
   if (!token) {
     const firstAdminSetup = registrationStatus !== null && !registrationStatus.admins_exist;
@@ -680,11 +776,14 @@ export default function AdminDashboard() {
   }
 
   const openProduct = (product?: AdminProduct, combo = false) => {
+    const isCombo = combo || Boolean(product?.is_combo);
     setSelectedProductImage(null);
+    setComboCatalogProductToAdd("");
     setProductEditor(
       product
         ? {
             id: product.id,
+            is_combo: isCombo,
             name: product.name,
             slug: product.slug,
             description: product.description,
@@ -705,8 +804,14 @@ export default function AdminDashboard() {
               batch_no: variant.batch_no ?? "",
               expiry_date: variant.expiry_date ?? "",
             })),
+            combo_catalog_products: (product.combo_catalog_products ?? []).map((item) => ({
+              product_id: item.product_id,
+              variant_id: item.variant_id,
+              quantity: String(item.quantity),
+            })),
           }
         : {
+            is_combo: isCombo,
             name: "",
             slug: "",
             description: "",
@@ -720,7 +825,8 @@ export default function AdminDashboard() {
             mrp: "",
             spice_level: "mild",
             image_url: "",
-            variants: [{ pack_size: "", price: "", mrp: "", sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }],
+            variants: isCombo ? [] : [{ pack_size: "", price: "", mrp: "", sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }],
+            combo_catalog_products: [],
           },
     );
   };
@@ -729,8 +835,16 @@ export default function AdminDashboard() {
     event.preventDefault();
     if (!productEditor) return;
     const editor = productEditor;
+    if (editor.is_combo && (
+      !editor.combo_catalog_products.length
+      || roundedBundleRegularPrice <= Number(editor.price)
+    )) {
+      setNotice("Add at least one regular product and set the combo price below their combined MRP.");
+      return;
+    }
     const method = editor.id ? "PUT" : "POST";
-    const url = editor.id ? `/api/admin/products/${editor.id}` : "/api/admin/products";
+    const resource = editor.is_combo ? "combos" : "products";
+    const url = editor.id ? `/api/admin/${resource}/${editor.id}` : `/api/admin/${resource}`;
     const saved = await runAction(
       async () => {
         const images = editor.image_url.split(/\r?\n/).map((imageUrl) => imageUrl.trim()).filter(Boolean);
@@ -743,18 +857,19 @@ export default function AdminDashboard() {
 
         const payload = {
           id: productId,
+          is_combo: editor.is_combo,
           name: editor.name.trim(),
           slug: editor.slug.trim(),
           description: editor.description.trim(),
-          ingredients: editor.ingredients.split(",").map((value) => value.trim()).filter(Boolean),
+          ingredients: editor.is_combo ? [] : editor.ingredients.split(",").map((value) => value.trim()).filter(Boolean),
           categories: editor.categories.split(",").map((value) => value.trim()).filter(Boolean),
           dish_type: editor.dish_type.trim() || null,
           status: editor.status,
           spice_level: editor.spice_level,
           price: Number(editor.price),
-          mrp: Number(editor.mrp),
+          mrp: editor.is_combo ? roundedBundleRegularPrice : Number(editor.mrp),
           images,
-          variants: editor.variants.filter((variant) => variant.pack_size.trim()).map((variant) => ({
+          variants: editor.is_combo ? [] : editor.variants.filter((variant) => variant.pack_size.trim()).map((variant) => ({
             pack_size: variant.pack_size.trim(),
             price: Number(variant.price),
             mrp: Number(variant.mrp),
@@ -763,6 +878,11 @@ export default function AdminDashboard() {
             batch_no: variant.batch_no.trim() || null,
             expiry_date: variant.expiry_date || null,
           })),
+          combo_catalog_products: editor.is_combo ? editor.combo_catalog_products.map((item) => ({
+            product_id: item.product_id,
+            variant_id: item.variant_id,
+            quantity: Number(item.quantity),
+          })) : [],
         };
         await adminRequest(url, token, { method, body: JSON.stringify(payload) });
       },
@@ -772,29 +892,6 @@ export default function AdminDashboard() {
       setProductEditor(null);
       setSelectedProductImage(null);
     }
-  };
-
-  const saveHeroImage = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    if (!selectedHeroImage) return;
-    const form = event.currentTarget;
-    const saved = await runAction(
-      () => uploadAdminHeroImage(selectedHeroImage, heroImageAlt.trim(), token),
-      "Hero image created.",
-    );
-    if (saved) {
-      setSelectedHeroImage(null);
-      setHeroImageAlt("");
-      form.reset();
-    }
-  };
-
-  const removeHeroImage = async (image: AdminHeroImage) => {
-    if (!window.confirm("Remove this image from the homepage hero?")) return;
-    await runAction(
-      () => adminRequest(`/api/admin/hero-images/${image.id}`, token, { method: "DELETE" }),
-      "Hero image removed.",
-    );
   };
 
   const saveCategory = async (event: FormEvent<HTMLFormElement>) => {
@@ -962,7 +1059,7 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-[80vh] bg-[#f7f3ec] text-ink-900 md:grid md:grid-cols-[250px_minmax(0,1fr)]">
-      <aside className="border-b border-paper-200 bg-[#302016] text-paper-100 md:min-h-[calc(100vh-1rem)] md:border-b-0 md:border-r md:px-4 md:py-6">
+      <aside className="border-b border-paper-200 bg-[#302016] text-paper-100 md:flex md:min-h-[calc(100vh-1rem)] md:flex-col md:border-b-0 md:border-r md:px-4 md:py-6">
         <div className="flex items-center justify-between gap-4 px-4 py-4 md:px-2 md:py-1">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-2xl bg-saffron-400/15 text-saffron-300">
@@ -991,16 +1088,16 @@ export default function AdminDashboard() {
             </button>
           ))}
         </nav>
-        <div className="mx-2 mt-8 hidden rounded-2xl border border-white/10 bg-white/[0.04] p-4 md:block">
-          <div className="flex items-center gap-2 text-xs font-semibold text-cardamom-200">
-            <CheckCircleIcon className="size-4" />
-            Single administrator
-          </div>
-          <p className="mt-2 text-xs leading-relaxed text-paper-400">Full access to the catalog, orders, promotions, reviews and reports.</p>
-        </div>
-        <button type="button" onClick={signOut} className="mt-7 hidden w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium text-paper-400 transition hover:bg-white/10 hover:text-white md:flex">
-          <ShieldIcon className="size-4" />
-          Sign out
+        <button
+          type="button"
+          onClick={signOut}
+          className="group mx-3 mb-3 mt-2 inline-flex shrink-0 items-center gap-2 rounded-xl border border-chili-400/30 bg-chili-500/15 px-3 py-2 text-left text-xs font-semibold text-chili-100 transition hover:border-chili-300/60 hover:bg-chili-500/30 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-chili-300 md:mx-0 md:mb-0 md:mt-3 md:w-full md:gap-3 md:rounded-2xl md:px-3.5 md:py-3"
+        >
+          <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-chili-500/20 text-chili-100 transition group-hover:bg-chili-500/40">
+            <LogOutIcon className="size-4" />
+          </span>
+          <span className="flex-1">Sign out</span>
+          <ArrowRightIcon className="size-4 opacity-60 transition-transform group-hover:translate-x-0.5" />
         </button>
       </aside>
 
@@ -1057,7 +1154,11 @@ export default function AdminDashboard() {
               </div>
               <label className="relative block w-full sm:max-w-xs">
                 <SearchIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400" />
-                <input className={`${fieldClass} mt-0 pl-9`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search order or customer" aria-label="Search orders" />
+                <input className={`${fieldClass} mt-0 pl-9`} value={search} onChange={(event) => {
+                  setSearch(event.target.value);
+                  setOrdersPage(1);
+                  setProductsPage(1);
+                }} placeholder="Search order or customer" aria-label="Search orders" />
               </label>
             </div>
             <div className="mb-4 flex flex-wrap gap-2" role="group" aria-label="Filter orders by status">
@@ -1069,7 +1170,10 @@ export default function AdminDashboard() {
                   <button
                     key={id}
                     type="button"
-                    onClick={() => setOrderFilter(id)}
+                    onClick={() => {
+                      setOrderFilter(id);
+                      setOrdersPage(1);
+                    }}
                     aria-pressed={orderFilter === id}
                     className={`inline-flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-semibold transition ${
                       orderFilter === id
@@ -1085,16 +1189,15 @@ export default function AdminDashboard() {
                 );
               })}
             </div>
-            <OrdersTable
-              orders={orders.filter((order) => {
-                const matchesFilter = orderFilter === "all" || order.status === orderFilter;
-                const matchesSearch = `${order.order_number} ${order.customer_name} ${order.phone} ${order.status}`
-                  .toLowerCase()
-                  .includes(search.toLowerCase());
-                return matchesFilter && matchesSearch;
-              })}
-              onSelect={openOrder}
-            />
+            <OrdersTable orders={visibleOrders} onSelect={openOrder} />
+            {filteredOrders.length ? (
+              <Pagination
+                page={currentOrdersPage}
+                pageSize={ADMIN_PAGE_SIZE}
+                total={filteredOrders.length}
+                onPageChange={setOrdersPage}
+              />
+            ) : null}
           </section>
         ) : null}
 
@@ -1103,89 +1206,51 @@ export default function AdminDashboard() {
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-ink-500">
                 {section === "campaigns"
-                  ? `${comboProducts.length} combos · manage bundle pricing, images and inventory here.`
+                  ? `${comboProducts.length} combos · build discounted bundles from catalog packs. Component stock is deducted when sold.`
                   : `${products.length} products in catalog · stock and batch details are managed per pack size.`}
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <label className="relative block">
                   <SearchIcon className="absolute top-1/2 left-3 size-4 -translate-y-1/2 text-ink-400" />
-                  <input className={`${fieldClass} mt-0 pl-9`} value={search} onChange={(event) => setSearch(event.target.value)} placeholder={section === "campaigns" ? "Search combos" : "Search products"} aria-label={section === "campaigns" ? "Search combos" : "Search products"} />
+                  <input className={`${fieldClass} mt-0 pl-9`} value={search} onChange={(event) => {
+                    setSearch(event.target.value);
+                    setProductsPage(1);
+                    setOrdersPage(1);
+                  }} placeholder={section === "campaigns" ? "Search combos" : "Search products"} aria-label={section === "campaigns" ? "Search combos" : "Search products"} />
                 </label>
                 <button type="button" onClick={() => openProduct(undefined, section === "campaigns")} className={primaryButton}><PlusIcon className="size-4" />{section === "campaigns" ? "Create combo" : "Add product"}</button>
               </div>
             </div>
-            <ProductsTable products={section === "campaigns" ? comboProducts : filteredProducts} onEdit={openProduct} onDelete={async (product) => {
-              if (!window.confirm(`Delete ${product.name}? This also removes its variants.`)) return;
-              await runAction(() => adminRequest(`/api/admin/products/${product.id}`, token, { method: "DELETE" }), section === "campaigns" ? "Combo removed." : "Product removed.");
+            <ProductsTable products={visibleProducts} onEdit={openProduct} onDelete={async (product) => {
+              const removalDetails = product.is_combo
+                ? "This also removes its included-product links."
+                : "This also removes its pack variants.";
+              if (!window.confirm(`Delete ${product.name}? ${removalDetails}`)) return;
+              const resource = product.is_combo ? "combos" : "products";
+              await runAction(() => adminRequest(`/api/admin/${resource}/${product.id}`, token, { method: "DELETE" }), section === "campaigns" ? "Combo removed." : "Product removed.");
             }} />
+            {activeProducts.length ? (
+              <Pagination
+                page={currentProductsPage}
+                pageSize={ADMIN_PAGE_SIZE}
+                total={activeProducts.length}
+                onPageChange={setProductsPage}
+              />
+            ) : null}
           </section>
         ) : null}
 
-        {section === "hero" ? (
-          <section className="mt-7 space-y-6">
-            <div className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
-              <h2 className="font-display text-xl font-semibold text-ink-950">Homepage hero images</h2>
-              <p className="mt-1 text-sm text-ink-500">
-                Add images to the homepage carousel. New images appear after the existing slides.
-              </p>
-              <form onSubmit={saveHeroImage} className="mt-5 grid gap-4 sm:grid-cols-2">
-                <ImageUploadField
-                  id="hero-image-file"
-                  title="Hero image"
-                  hint="Select an image for the homepage carousel."
-                  file={selectedHeroImage}
-                  required
-                  className="sm:col-span-2"
-                  onChange={setSelectedHeroImage}
-                />
-                <label className={labelClass}>
-                  Image description (alt text)
-                  <input
-                    className={fieldClass}
-                    value={heroImageAlt}
-                    onChange={(event) => setHeroImageAlt(event.target.value)}
-                    placeholder="Freshly ground spice blends"
-                  />
-                </label>
-                <div className="sm:col-span-2">
-                  <button type="submit" className={primaryButton} disabled={busy || !selectedHeroImage}>
-                    <PlusIcon className="size-4" />
-                    {busy ? "Uploading…" : "Add hero image"}
-                  </button>
-                </div>
-              </form>
-            </div>
-            {heroImages.length ? (
-              <div className="grid gap-4 lg:grid-cols-2">
-                {heroImages.map((image, index) => (
-                  <article key={image.id} className="overflow-hidden rounded-2xl border border-paper-200 bg-white shadow-xs">
-                    <SmartImage
-                      src={image.url}
-                      alt={image.alt_text || `Homepage hero image ${index + 1}`}
-                      aspect="aspect-[2.76/1]"
-                      sizes="(max-width: 1024px) 100vw, 50vw"
-                    />
-                    <div className="flex items-center justify-between gap-3 p-4">
-                      <div className="min-w-0">
-                        <p className="text-sm font-semibold text-ink-900">Slide {index + 1}</p>
-                        <p className="truncate text-xs text-ink-500">{image.alt_text || "No image description"}</p>
-                      </div>
-                      <button
-                        type="button"
-                        className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50 disabled:opacity-50"
-                        aria-label={`Remove hero image ${index + 1}`}
-                        onClick={() => void removeHeroImage(image)}
-                        disabled={busy}
-                      >
-                        <TrashIcon className="size-4" />
-                      </button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            ) : <EmptyPanel>No hero images configured</EmptyPanel>}
-          </section>
+        {section === "homepage" ? (
+          <HomepageManagement
+            token={token}
+            products={products}
+            categories={categories}
+            heroImages={heroImages}
+            onRefresh={() => refresh(true)}
+          />
         ) : null}
+
+        {section === "recipes" ? <RecipesManagement token={token} /> : null}
 
         {section === "categories" ? (
           <section className="mt-7">
@@ -1253,7 +1318,7 @@ export default function AdminDashboard() {
             <p className="mb-4 text-sm text-ink-500">Moderate customer feedback before it appears on product pages.</p>
             {reviews.length ? (
               <div className="space-y-3">
-                {reviews.map((review) => (
+                {visibleReviews.map((review) => (
                   <article key={review.id} className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
                     <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
                       <div>
@@ -1262,7 +1327,7 @@ export default function AdminDashboard() {
                           <span className="text-saffron-600" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(Math.max(0, Math.min(review.rating, 5)))}</span>
                           <span className="chip">{displayStatus(review.status)}</span>
                         </div>
-                        <p className="mt-1 text-xs text-ink-400">{review.product_name ?? `Product #${review.product_id}`}{review.created_at ? ` · ${new Date(review.created_at).toLocaleDateString()}` : ""}</p>
+                        <p className="mt-1 text-xs text-ink-400">{review.product_name ?? `${review.combo_id ? "Combo" : "Product"} #${review.combo_id ?? review.product_id ?? "unknown"}`}{review.created_at ? ` · ${new Date(review.created_at).toLocaleDateString()}` : ""}</p>
                         <p className="mt-3 text-sm leading-relaxed text-ink-700">{review.comment}</p>
                       </div>
                       {review.status === "pending" ? (
@@ -1276,6 +1341,14 @@ export default function AdminDashboard() {
                 ))}
               </div>
             ) : <EmptyPanel>No reviews in the moderation queue</EmptyPanel>}
+            {reviews.length ? (
+              <Pagination
+                page={currentReviewsPage}
+                pageSize={ADMIN_PAGE_SIZE}
+                total={reviews.length}
+                onPageChange={setReviewsPage}
+              />
+            ) : null}
           </section>
         ) : null}
 
@@ -1471,17 +1544,108 @@ export default function AdminDashboard() {
       </div>
 
       {productEditor ? (
-        <Modal title={productEditor.id ? "Edit product" : "Add product"} onClose={() => setProductEditor(null)} wide>
+        <Modal title={productEditor.is_combo ? (productEditor.id ? "Edit combo" : "Create combo") : (productEditor.id ? "Edit product" : "Add product")} onClose={() => setProductEditor(null)} wide>
           <form onSubmit={saveProduct} className="space-y-5">
             <div className="grid gap-4 sm:grid-cols-2">
-              <label className={labelClass}>Product name<input required className={fieldClass} value={productEditor.name} onChange={(event) => setProductEditor({ ...productEditor, name: event.target.value })} /></label>
+              <label className={labelClass}>{productEditor.is_combo ? "Combo name" : "Product name"}<input required className={fieldClass} value={productEditor.name} onChange={(event) => setProductEditor({ ...productEditor, name: event.target.value })} /></label>
               <label className={labelClass}>URL slug<input required className={fieldClass} value={productEditor.slug} onChange={(event) => setProductEditor({ ...productEditor, slug: event.target.value })} /></label>
-              <label className={labelClass}>Price (₹)<input required type="number" min="0" step="0.01" className={fieldClass} value={productEditor.price} onChange={(event) => setProductEditor({ ...productEditor, price: event.target.value })} /></label>
-              <label className={labelClass}>MRP (₹)<input required type="number" min="0" step="0.01" className={fieldClass} value={productEditor.mrp} onChange={(event) => setProductEditor({ ...productEditor, mrp: event.target.value })} /></label>
-              <label className={labelClass}>Categories<input className={fieldClass} placeholder="Whole Spices, Breakfast Masalas" value={productEditor.categories} onChange={(event) => setProductEditor({ ...productEditor, categories: event.target.value })} /></label>
-              <label className={labelClass}>Dish type<input className={fieldClass} placeholder="Sambar, biryani…" value={productEditor.dish_type} onChange={(event) => setProductEditor({ ...productEditor, dish_type: event.target.value })} /></label>
-              <label className={labelClass}>Spice level<select className={fieldClass} value={productEditor.spice_level} onChange={(event) => setProductEditor({ ...productEditor, spice_level: event.target.value })}><option value="mild">Mild</option><option value="medium">Medium</option><option value="hot">Hot</option></select></label>
+              {productEditor.is_combo ? (
+                <>
+                  <label className={labelClass}>Discounted combo price (₹)<input required type="number" min="0" max={Math.max(0, bundleRegularPrice - 0.01)} step="0.01" className={fieldClass} value={productEditor.price} onChange={(event) => setProductEditor({ ...productEditor, price: event.target.value })} /></label>
+                  <label className={labelClass}>Combined regular price (₹)<input readOnly className={`${fieldClass} bg-paper-100`} value={roundedBundleRegularPrice.toFixed(2)} /></label>
+                </>
+              ) : (
+                <>
+                  <label className={labelClass}>Price (₹)<input required type="number" min="0" step="0.01" className={fieldClass} value={productEditor.price} onChange={(event) => setProductEditor({ ...productEditor, price: event.target.value })} /></label>
+                  <label className={labelClass}>MRP (₹)<input required type="number" min="0" step="0.01" className={fieldClass} value={productEditor.mrp} onChange={(event) => setProductEditor({ ...productEditor, mrp: event.target.value })} /></label>
+                  <label className={labelClass}>Categories<input className={fieldClass} placeholder="Whole Spices, Breakfast Masalas" value={productEditor.categories} onChange={(event) => setProductEditor({ ...productEditor, categories: event.target.value })} /></label>
+                  <label className={labelClass}>Dish type<input className={fieldClass} placeholder="Sambar, biryani…" value={productEditor.dish_type} onChange={(event) => setProductEditor({ ...productEditor, dish_type: event.target.value })} /></label>
+                  <label className={labelClass}>Spice level<select className={fieldClass} value={productEditor.spice_level} onChange={(event) => setProductEditor({ ...productEditor, spice_level: event.target.value })}><option value="mild">Mild</option><option value="medium">Medium</option><option value="hot">Hot</option></select></label>
+                </>
+              )}
               <label className={labelClass}>Status<select className={fieldClass} value={productEditor.status} onChange={(event) => setProductEditor({ ...productEditor, status: event.target.value })}><option value="active">Active</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
+              {productEditor.is_combo ? (
+                <section className="sm:col-span-2 rounded-2xl border border-paper-200 bg-paper-50 p-4">
+                  <div className="mb-3">
+                    <h3 className="font-semibold text-ink-900">Regular products in this combo</h3>
+                    <p className="text-xs text-ink-500">Select at least one catalog product pack. Its regular inventory is deducted when the combo is purchased.</p>
+                  </div>
+                  <div>
+                    <div className="rounded-xl bg-white p-3">
+                      <div className="flex flex-col gap-2 sm:flex-row">
+                        <label className="sr-only" htmlFor="combo-catalog-product">Add a regular product pack</label>
+                        <select
+                          id="combo-catalog-product"
+                          className={`${fieldClass} mt-0`}
+                          value={comboCatalogProductToAdd}
+                          onChange={(event) => setComboCatalogProductToAdd(event.target.value)}
+                        >
+                          <option value="">Add a regular product pack (optional)…</option>
+                          {regularProducts.flatMap((product) => product.variants.map((variant) => (
+                            <option key={variant.id} value={`${product.id}:${variant.id}`}>
+                              {product.name} · {variant.pack_size}
+                            </option>
+                          )))}
+                        </select>
+                        <button
+                          type="button"
+                          className={secondaryButton}
+                          disabled={!comboCatalogProductToAdd}
+                          onClick={() => {
+                            const [productId, variantId] = comboCatalogProductToAdd.split(":");
+                            if (!productId || !variantId || productEditor.combo_catalog_products.some((item) => item.variant_id === variantId)) return;
+                            setProductEditor({
+                              ...productEditor,
+                              combo_catalog_products: [...productEditor.combo_catalog_products, {
+                                product_id: productId,
+                                variant_id: variantId,
+                                quantity: "1",
+                              }],
+                            });
+                            setComboCatalogProductToAdd("");
+                          }}
+                        ><PlusIcon className="size-4" />Add regular product</button>
+                      </div>
+                      <div className="mt-3 space-y-2">
+                        {productEditor.combo_catalog_products.map((item, index) => {
+                          const product = regularProducts.find((candidate) => candidate.id === item.product_id);
+                          const variant = product?.variants.find((candidate) => candidate.id === item.variant_id);
+                          return (
+                            <div key={item.variant_id} className="flex flex-wrap items-center gap-3 rounded-lg border border-paper-200 p-3">
+                              <span className="min-w-0 flex-1 text-sm font-medium text-ink-800">
+                                {product?.name ?? "Unavailable product"} · {variant?.pack_size ?? "Unavailable pack"} · {formatINR(variant?.mrp ?? 0)} MRP
+                              </span>
+                              <label className={`${labelClass} w-28`}>Quantity
+                                <input
+                                  type="number"
+                                  min="1"
+                                  max="20"
+                                  step="1"
+                                  className={fieldClass}
+                                  value={item.quantity}
+                                  onChange={(event) => setProductEditor({
+                                    ...productEditor,
+                                    combo_catalog_products: productEditor.combo_catalog_products.map((row, rowIndex) => rowIndex === index ? { ...row, quantity: event.target.value } : row),
+                                  })}
+                                />
+                              </label>
+                              <button type="button" aria-label={`Remove regular product ${index + 1}`} className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50" onClick={() => setProductEditor({
+                                ...productEditor,
+                                combo_catalog_products: productEditor.combo_catalog_products.filter((_, rowIndex) => rowIndex !== index),
+                              })}><TrashIcon className="size-4" /></button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                  </div>
+                  <div className="mt-3 flex flex-wrap justify-between gap-2 border-t border-paper-200 pt-3 text-sm">
+                    <span className="text-ink-600">Bundle savings</span>
+                    <span className="font-semibold text-cardamom-700">{formatINR(Math.max(0, roundedBundleRegularPrice - Number(productEditor.price || 0)))}</span>
+                  </div>
+                </section>
+              ) : null}
               <ImageUploadField
                 id="product-image-file"
                 title="Product image"
@@ -1492,9 +1656,10 @@ export default function AdminDashboard() {
               />
               <label className={`${labelClass} sm:col-span-2`}>Additional image URLs (one per line)<textarea rows={2} className={fieldClass} placeholder={"https://…/front.webp\nhttps://…/back.webp"} value={productEditor.image_url} onChange={(event) => setProductEditor({ ...productEditor, image_url: event.target.value })} /></label>
               <label className={`${labelClass} sm:col-span-2`}>Description<textarea required rows={3} className={fieldClass} value={productEditor.description} onChange={(event) => setProductEditor({ ...productEditor, description: event.target.value })} /></label>
-              <label className={`${labelClass} sm:col-span-2`}>Ingredients (comma-separated)<input className={fieldClass} value={productEditor.ingredients} onChange={(event) => setProductEditor({ ...productEditor, ingredients: event.target.value })} /></label>
+              {!productEditor.is_combo ? <label className={`${labelClass} sm:col-span-2`}>Ingredients (comma-separated)<input className={fieldClass} value={productEditor.ingredients} onChange={(event) => setProductEditor({ ...productEditor, ingredients: event.target.value })} /></label> : null}
             </div>
-            <div>
+            {!productEditor.is_combo ? (
+              <div>
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div><h3 className="font-semibold text-ink-900">Pack sizes, inventory & batch</h3><p className="text-xs text-ink-500">Add SKU, stock quantity, batch number and expiry date per variant.</p></div>
                 <button type="button" className={secondaryButton} onClick={() => setProductEditor({ ...productEditor, variants: [...productEditor.variants, { pack_size: "", price: productEditor.price, mrp: productEditor.mrp, sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }] })}><PlusIcon className="size-4" />Add pack</button>
@@ -1514,13 +1679,14 @@ export default function AdminDashboard() {
                       <label className={labelClass} key={key}>{label}<input required={key !== "expiry_date" && key !== "batch_no"} type={key === "expiry_date" ? "date" : key === "price" || key === "mrp" || key === "stock_qty" ? "number" : "text"} min={key === "price" || key === "mrp" || key === "stock_qty" ? "0" : undefined} step={key === "price" || key === "mrp" ? "0.01" : undefined} className={fieldClass} placeholder={placeholder} value={variant[key]} onChange={(event) => setProductEditor({ ...productEditor, variants: productEditor.variants.map((item, row) => row === index ? { ...item, [key]: event.target.value } : item) })} /></label>
                     ))}
                     <button type="button" aria-label={`Remove pack ${index + 1}`} className="self-end rounded-xl p-2.5 text-chili-600 hover:bg-chili-50" onClick={() => setProductEditor({ ...productEditor, variants: productEditor.variants.filter((_, row) => row !== index) })}><TrashIcon className="size-4" /></button>
-                  </div>
+                    </div>
                 ))}
               </div>
-            </div>
+              </div>
+            ) : null}
             <div className="flex flex-col-reverse gap-2 border-t border-paper-200 pt-4 sm:flex-row sm:justify-end">
               <button type="button" className={secondaryButton} onClick={() => setProductEditor(null)}>Cancel</button>
-              <button type="submit" className={primaryButton} disabled={busy}>{busy ? "Saving…" : "Save product"}</button>
+              <button type="submit" className={primaryButton} disabled={busy}>{busy ? "Saving…" : productEditor.is_combo ? "Save combo" : "Save product"}</button>
             </div>
           </form>
         </Modal>

@@ -9,7 +9,9 @@ type HeroImage = {
   alt: string;
 };
 
-export function HeroImageCarousel({ images }: { images: HeroImage[] }) {
+export function HeroImageCarousel({ images }: {
+  images: HeroImage[];
+}) {
   const [activeIndex, setActiveIndex] = useState(0);
   const heroImages = images.filter((image) => image.src);
 

@@ -26,6 +26,19 @@ export type ProductVariant = {
   expiry_date?: string;
 };
 
+export type ComboCatalogProduct = {
+  id: string;
+  product_id: string;
+  variant_id: string;
+  name: string;
+  sku: string;
+  quantity: number;
+  pack_size: string;
+  price: number;
+  mrp: number;
+  stock_qty: number;
+};
+
 export type Product = {
   id: string;
   name: string;
@@ -37,6 +50,7 @@ export type Product = {
   discount_pct: number;
   spice_level: string;
   status: string;
+  is_combo: boolean;
   categories: string[];
   dish_type?: string | null;
   is_veg?: boolean;
@@ -48,6 +62,7 @@ export type Product = {
   variant_type?: string | null;
   recipe_video_url?: string | null;
   variants: ProductVariant[];
+  combo_catalog_products: ComboCatalogProduct[];
   images: ProductImage[];
 };
 
@@ -61,7 +76,39 @@ export type Recipe = {
   ingredients: string[];
   steps: string[];
   hero_image_url: string;
+  hero_image_key?: string | null;
   video_url?: string | null;
+};
+
+export type HomepageContent = {
+  ticker: string[];
+  categories: {
+    title: string;
+    items: {
+      slug: string;
+      label: string;
+      image_url: string;
+      image_key: string;
+      image_product_slug: string;
+    }[];
+  };
+  bestsellers: {
+    title: string;
+    product_slugs: string[];
+  };
+  combos: {
+    title: string;
+    description: string;
+    product_slugs: string[];
+  };
+  recipes: {
+    eyebrow: string;
+    title: string;
+    description: string;
+    link_label: string;
+    link_href: string;
+    recipe_slugs: string[];
+  };
 };
 
 export type ActiveOffer = {

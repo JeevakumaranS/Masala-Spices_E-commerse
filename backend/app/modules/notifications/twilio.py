@@ -8,8 +8,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import admin_integration_settings_table
-from app.modules.notifications.crypto import InvalidToken, decrypt_integration_secret
+from app.core.database import notification_settings_table
 
 logger = logging.getLogger(__name__)
 
@@ -37,16 +36,16 @@ async def send_order_confirmation_sms(
     order: dict[str, Any],
 ) -> SmsDeliveryStatus:
     result = await db.execute(
-        select(admin_integration_settings_table).limit(1)
+        select(notification_settings_table).limit(1)
     )
     settings = result.mappings().first()
     if settings is None or not settings["sms_enabled"]:
         return "disabled"
 
-    encrypted_auth_token = settings["sms_api_key_encrypted"]
-    encrypted_account_sid = settings["sms_account_sid_encrypted"]
+    auth_token = settings["sms_api_key"]
+    account_sid = settings["sms_account_sid"]
     sender_phone = settings["sms_sender_phone"]
-    if not encrypted_auth_token or not encrypted_account_sid or not sender_phone:
+    if not auth_token or not account_sid or not sender_phone:
         logger.error("Twilio order confirmation is enabled but its configuration is incomplete.")
         return "failed"
     if not re.fullmatch(r"\+[1-9]\d{7,14}", str(order.get("phone") or "")):
@@ -57,8 +56,6 @@ async def send_order_confirmation_sms(
         return "failed"
 
     try:
-        auth_token = decrypt_integration_secret(encrypted_auth_token)
-        account_sid = decrypt_integration_secret(encrypted_account_sid)
         async with httpx.AsyncClient(timeout=15.0) as client:
             response = await client.post(
                 _TWILIO_MESSAGES_URL.format(account_sid=account_sid),
@@ -70,7 +67,7 @@ async def send_order_confirmation_sms(
                 },
             )
             response.raise_for_status()
-    except (httpx.HTTPError, InvalidToken, UnicodeError):
+    except httpx.HTTPError:
         logger.exception(
             "Twilio failed to send order confirmation for order %s.",
             order["order_number"],

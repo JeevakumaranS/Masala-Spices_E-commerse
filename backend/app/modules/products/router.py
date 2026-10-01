@@ -9,7 +9,14 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.database import get_db, products_table, reviews_table, variants_table
+from app.core.database import (
+    combo_catalog_products_table,
+    combos_table,
+    get_db,
+    products_table,
+    reviews_table,
+    variants_table,
+)
 from app.services.storage import get_file_url, get_object_key, object_exists
 from app.modules.products.schemas import (
     PaginatedProducts,
@@ -37,10 +44,24 @@ async def list_products(
     page_size: int = 12,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    result = await db.execute(select(products_table).order_by(products_table.c.name))
-    filtered = [dict(row) for row in result.mappings()]
+    product_result = await db.execute(select(products_table).order_by(products_table.c.name))
+    combo_result = await db.execute(select(combos_table).order_by(combos_table.c.name))
+    filtered = [
+        {**dict(row), "is_combo": False}
+        for row in product_result.mappings()
+    ] + [
+        {
+            **dict(row),
+            "is_combo": True,
+            "ingredients": [],
+        }
+        for row in combo_result.mappings()
+    ]
     if category:
-        filtered = [item for item in filtered if category in (item.get("categories") or [])]
+        if category == "combos-packs":
+            filtered = [item for item in filtered if item.get("is_combo")]
+        else:
+            filtered = [item for item in filtered if category in (item.get("categories") or [])]
     if spice_level:
         filtered = [item for item in filtered if item["spice_level"].lower() == spice_level.lower()]
     if dish_type:
@@ -81,26 +102,71 @@ async def list_products(
 async def get_product(slug: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(products_table).where(products_table.c.slug == slug))
     product = result.mappings().first()
-    if not product:
-        raise HTTPException(status_code=404, detail="Product not found")
-    return (await hydrate_products(db, [dict(product)]))[0]
+    if product is not None:
+        item = {**dict(product), "is_combo": False}
+    else:
+        result = await db.execute(select(combos_table).where(combos_table.c.slug == slug))
+        combo = result.mappings().first()
+        if combo is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+        item = {**dict(combo), "is_combo": True, "ingredients": []}
+    return (await hydrate_products(db, [item]))[0]
 
 
 async def hydrate_products(db: AsyncSession, products: list[dict[str, Any]]) -> list[dict[str, Any]]:
     if not products:
         return []
-    ids = [item["id"] for item in products]
+    ids = [item["id"] for item in products if not item.get("is_combo")]
     result = await db.execute(
         select(variants_table).where(variants_table.c.product_id.in_(ids))
-    )
+    ) if ids else None
     variants_by_product: dict[str, list[dict[str, Any]]] = {}
-    for row in result.mappings():
-        variant = dict(row)
-        if variant.get("expiry_date"):
-            variant["expiry_date"] = variant["expiry_date"].isoformat()
-        variants_by_product.setdefault(row["product_id"], []).append(variant)
+    if result is not None:
+        for row in result.mappings():
+            variant = dict(row)
+            if variant.get("expiry_date"):
+                variant["expiry_date"] = variant["expiry_date"].isoformat()
+            variants_by_product.setdefault(row["product_id"], []).append(variant)
+
+    combo_ids = [item["id"] for item in products if item.get("is_combo")]
+    combo_catalog_products_by_id: dict[UUID, list[dict[str, Any]]] = {}
+    if combo_ids:
+        catalog_result = await db.execute(
+            select(
+                combo_catalog_products_table.c.id,
+                combo_catalog_products_table.c.combo_id,
+                combo_catalog_products_table.c.product_id,
+                combo_catalog_products_table.c.variant_id,
+                combo_catalog_products_table.c.quantity,
+                products_table.c.name,
+                variants_table.c.sku,
+                variants_table.c.pack_size,
+                variants_table.c.price,
+                variants_table.c.mrp,
+                variants_table.c.stock_qty,
+            )
+            .join(products_table, products_table.c.id == combo_catalog_products_table.c.product_id)
+            .join(variants_table, variants_table.c.id == combo_catalog_products_table.c.variant_id)
+            .where(combo_catalog_products_table.c.combo_id.in_(combo_ids))
+            .order_by(combo_catalog_products_table.c.sort_order)
+        )
+        for row in catalog_result.mappings():
+            combo_catalog_products_by_id.setdefault(row["combo_id"], []).append({
+                "id": row["id"],
+                "product_id": row["product_id"],
+                "variant_id": row["variant_id"],
+                "name": row["name"],
+                "sku": row["sku"],
+                "quantity": int(row["quantity"]),
+                "pack_size": row["pack_size"],
+                "price": float(row["price"]),
+                "mrp": float(row["mrp"]),
+                "stock_qty": int(row["stock_qty"]),
+            })
     for product in products:
+        product["is_combo"] = bool(product.get("is_combo", False))
         product["variants"] = variants_by_product.get(product["id"], [])
+        product["combo_catalog_products"] = combo_catalog_products_by_id.get(product["id"], [])
         product["ingredients"] = product.get("ingredients") or []
         product["categories"] = product.get("categories") or []
         image_references = product.get("images") or []
@@ -137,10 +203,18 @@ async def get_product_reviews(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     product = await db.execute(select(products_table.c.id).where(products_table.c.id == product_id))
-    if product.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Product not found")
+    is_combo = product.scalar_one_or_none() is None
+    if is_combo:
+        combo = await db.execute(select(combos_table.c.id).where(combos_table.c.id == product_id))
+        if combo.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Product not found")
 
-    filters = (reviews_table.c.product_id == product_id, reviews_table.c.status == "approved")
+    target_filter = (
+        reviews_table.c.combo_id == product_id
+        if is_combo
+        else reviews_table.c.product_id == product_id
+    )
+    filters = (target_filter, reviews_table.c.status == "approved")
     summary = await db.execute(
         select(
             func.count(reviews_table.c.id),
@@ -170,16 +244,28 @@ async def submit_review(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     product = await db.execute(select(products_table.c.id).where(products_table.c.id == product_id))
-    if product.scalar_one_or_none() is None:
-        raise HTTPException(status_code=404, detail="Product not found")
+    is_combo = product.scalar_one_or_none() is None
+    if is_combo:
+        combo = await db.execute(select(combos_table.c.id).where(combos_table.c.id == product_id))
+        if combo.scalar_one_or_none() is None:
+            raise HTTPException(status_code=404, detail="Product not found")
+    if is_combo:
+        product_values = {"combo_id": product_id, "product_id": None}
+    else:
+        product_values = {"product_id": product_id, "combo_id": None}
+    product_values.update({
+        "reviewer_name": payload.reviewer_name.strip(),
+        "rating": payload.rating,
+        "comment": payload.comment.strip(),
+        "status": "pending",
+    })
     result = await db.execute(
-        insert(reviews_table).values(
-            product_id=product_id,
-            reviewer_name=payload.reviewer_name.strip(),
-            rating=payload.rating,
-            comment=payload.comment.strip(),
-            status="pending",
-        ).returning(reviews_table.c.id)
+        insert(reviews_table).values(**product_values).returning(reviews_table.c.id)
     )
     await db.commit()
-    return {"status": "pending_moderation", "id": result.scalar_one(), "product_id": product_id}
+    return {
+        "status": "pending_moderation",
+        "id": result.scalar_one(),
+        "product_id": None if is_combo else product_id,
+        "combo_id": product_id if is_combo else None,
+    }

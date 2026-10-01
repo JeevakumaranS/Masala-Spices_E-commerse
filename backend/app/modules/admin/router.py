@@ -19,17 +19,21 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import (
-    admin_integration_settings_table,
+    notification_settings_table,
     admin_users_table,
     categories_table,
+    combo_catalog_products_table,
+    combos_table,
     coupons_table,
     get_db,
     hero_images_table,
+    homepage_settings_table,
     order_history_table,
     order_items_table,
     orders_table,
     products_table,
     reviews_table,
+    recipes_table,
     session_factory,
     variants_table,
 )
@@ -37,15 +41,11 @@ from app.modules.admin.auth import bearer, hash_password, issue_token, require_a
 from app.modules.admin.schemas import AdminOverviewResponse, LoginRequest, RegisterAdminRequest
 from app.modules.analytics.router import analytics_summary
 from app.modules.notifications.brevo import send_order_status_email
-from app.modules.notifications.crypto import (
-    InvalidToken,
-    decrypt_integration_secret,
-    integration_settings_cipher,
-)
 from app.modules.orders.catalog import CatalogValidationError, quote_order_items
 from app.modules.orders.schemas import OrderItemInput
 from app.modules.orders.shipping import calculate_shipping
 from app.modules.products.router import hydrate_products
+from app.modules.recipes.schemas import RecipeInput
 from app.services.storage import delete_object, get_file_url, get_object_key, upload_file
 
 router = APIRouter(prefix="/api/admin", tags=["admin"])
@@ -229,6 +229,33 @@ async def delete_hero_image(image_id: UUID, db: AsyncSession = Depends(get_db)) 
     return Response(status_code=204)
 
 
+class HeroImageUpdate(BaseModel):
+    alt_text: str = Field(default="", max_length=500)
+    sort_order: int = Field(ge=0)
+
+
+@router.put(
+    "/hero-images/{image_id}",
+    dependencies=[Depends(require_admin)],
+)
+async def update_hero_image(
+    image_id: UUID,
+    payload: HeroImageUpdate,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    result = await db.execute(
+        update(hero_images_table)
+        .where(hero_images_table.c.id == image_id)
+        .values(alt_text=payload.alt_text.strip(), sort_order=payload.sort_order)
+        .returning(hero_images_table)
+    )
+    image = result.mappings().first()
+    if image is None:
+        raise HTTPException(status_code=404, detail="Hero image not found.")
+    await db.commit()
+    return await _hero_image_response(image)
+
+
 class VariantInput(BaseModel):
     id: UUID | None = None
     pack_size: str = Field(min_length=1, max_length=32)
@@ -238,6 +265,12 @@ class VariantInput(BaseModel):
     sku: str = Field(min_length=1, max_length=64)
     batch_no: str | None = None
     expiry_date: date | None = None
+
+
+class ComboCatalogProductInput(BaseModel):
+    product_id: UUID
+    variant_id: UUID
+    quantity: int = Field(ge=1, le=20)
 
 
 class ProductInput(BaseModel):
@@ -251,11 +284,27 @@ class ProductInput(BaseModel):
     discount_pct: int = Field(default=0, ge=0, le=100)
     spice_level: str = "mild"
     status: str = "active"
+    is_combo: bool = False
     variants: list[VariantInput] = Field(default_factory=list)
     images: list[str] = Field(default_factory=list)
+    combo_catalog_products: list[ComboCatalogProductInput] = Field(default_factory=list, max_length=48)
     categories: list[str] = Field(default_factory=list)
     dish_type: str | None = None
     is_veg: bool = True
+
+    @model_validator(mode="after")
+    def validate_combo_contents(self) -> "ProductInput":
+        if self.is_combo and not self.combo_catalog_products:
+            raise ValueError("A combo must include at least one product.")
+        if self.is_combo and self.price >= self.mrp:
+            raise ValueError("The combo price must be lower than the combined regular price.")
+        if not self.is_combo and self.combo_catalog_products:
+            raise ValueError("Only combo products can contain bundled products.")
+        if len({item.variant_id for item in self.combo_catalog_products}) != len(
+            self.combo_catalog_products
+        ):
+            raise ValueError("A regular product pack can only be added once to a combo.")
+        return self
 
 
 class CategoryInput(BaseModel):
@@ -423,10 +472,10 @@ def _integration_settings_response(row: Any) -> dict[str, Any]:
         "sms_enabled": bool(row["sms_enabled"]),
         "email_enabled": bool(row["email_enabled"]),
         "sms_api_key_configured": bool(
-            row["sms_api_key_encrypted"]
-            and row["sms_account_sid_encrypted"]
+            row["sms_api_key"]
+            and row["sms_account_sid"]
         ),
-        "email_api_key_configured": bool(row["email_api_key_encrypted"]),
+        "email_api_key_configured": bool(row["email_api_key"]),
         "email_sender_name": row["email_sender_name"] or "",
         "email_sender_email": row["email_sender_email"] or "",
     }
@@ -461,7 +510,7 @@ async def get_admin_integration_settings(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     result = await db.execute(
-        select(admin_integration_settings_table).limit(1)
+        select(notification_settings_table).limit(1)
     )
     row = result.mappings().first()
     if row is None:
@@ -479,7 +528,7 @@ async def reveal_admin_integration_key(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, str]:
     result = await db.execute(
-        select(admin_integration_settings_table).limit(1)
+        select(notification_settings_table).limit(1)
     )
     settings = result.mappings().first()
     if settings is None:
@@ -488,31 +537,22 @@ async def reveal_admin_integration_key(
             detail="Integration settings are not initialized. Apply the latest database migration.",
         )
 
-    encrypted_key = settings[f"{payload.channel}_api_key_encrypted"]
-    if not encrypted_key:
+    api_key = settings[f"{payload.channel}_api_key"]
+    if not api_key:
         raise HTTPException(status_code=404, detail="No API key is configured for this integration.")
-    try:
-        api_key = decrypt_integration_secret(encrypted_key)
-        if payload.channel == "sms":
-            encrypted_account_sid = settings["sms_account_sid_encrypted"]
-            if not encrypted_account_sid:
-                raise HTTPException(
-                    status_code=404,
-                    detail="Twilio account details are not fully configured.",
-                )
-            account_sid = decrypt_integration_secret(encrypted_account_sid)
-    except (InvalidToken, UnicodeError) as exc:
-        raise HTTPException(
-            status_code=503,
-            detail="The saved API key could not be decrypted. Check that ADMIN_TOKEN_SECRET has not changed.",
-        ) from exc
 
     response.headers["Cache-Control"] = "no-store, private"
     response.headers["Pragma"] = "no-cache"
     if payload.channel == "sms":
+        account_sid = settings["sms_account_sid"]
+        if not account_sid:
+            raise HTTPException(
+                status_code=404,
+                detail="Twilio account details are not fully configured.",
+            )
         return {
             "account_sid": account_sid,
-            "api_key": api_key,
+            "auth_token": api_key,
             "sender_phone": settings["sms_sender_phone"] or "",
         }
     return {"api_key": api_key}
@@ -529,30 +569,18 @@ async def update_admin_integration_settings(
         if value is not None:
             values[field] = value
 
-    if (
-        payload.sms_api_key is not None
-        or payload.sms_account_sid is not None
-        or payload.email_api_key is not None
-    ):
-        cipher = integration_settings_cipher()
-        if payload.sms_api_key is not None:
-            values["sms_api_key_encrypted"] = cipher.encrypt(
-                payload.sms_api_key.encode("utf-8")
-            ).decode("ascii")
-        if payload.sms_account_sid is not None:
-            values["sms_account_sid_encrypted"] = cipher.encrypt(
-                payload.sms_account_sid.encode("utf-8")
-            ).decode("ascii")
-        if payload.email_api_key is not None:
-            values["email_api_key_encrypted"] = cipher.encrypt(
-                payload.email_api_key.encode("utf-8")
-            ).decode("ascii")
+    if payload.sms_api_key is not None:
+        values["sms_api_key"] = payload.sms_api_key
+    if payload.sms_account_sid is not None:
+        values["sms_account_sid"] = payload.sms_account_sid
+    if payload.email_api_key is not None:
+        values["email_api_key"] = payload.email_api_key
     if payload.clear_sms_api_key:
-        values["sms_api_key_encrypted"] = None
-        values["sms_account_sid_encrypted"] = None
+        values["sms_api_key"] = None
+        values["sms_account_sid"] = None
         values["sms_sender_phone"] = None
     if payload.clear_email_api_key:
-        values["email_api_key_encrypted"] = None
+        values["email_api_key"] = None
     if "sms_sender_phone" in payload.model_fields_set and not payload.clear_sms_api_key:
         values["sms_sender_phone"] = payload.sms_sender_phone or None
     for field in ("email_sender_name", "email_sender_email"):
@@ -561,7 +589,7 @@ async def update_admin_integration_settings(
     values["updated_at"] = datetime.now(timezone.utc).replace(tzinfo=None)
 
     result = await db.execute(
-        select(admin_integration_settings_table)
+        select(notification_settings_table)
         .limit(1)
         .with_for_update()
     )
@@ -571,17 +599,17 @@ async def update_admin_integration_settings(
             status_code=503,
             detail="Integration settings are not initialized. Apply the latest database migration.",
         )
-    effective_api_key = values.get("email_api_key_encrypted") or (
-        None if payload.clear_email_api_key else row["email_api_key_encrypted"]
+    effective_api_key = values.get("email_api_key") or (
+        None if payload.clear_email_api_key else row["email_api_key"]
     )
     effective_sender_name = values.get("email_sender_name", row["email_sender_name"])
     effective_sender_email = values.get("email_sender_email", row["email_sender_email"])
     effective_email_enabled = values.get("email_enabled", row["email_enabled"])
     effective_sms_credentials = (
-        values.get("sms_api_key_encrypted")
-        or (None if payload.clear_sms_api_key else row["sms_api_key_encrypted"]),
-        values.get("sms_account_sid_encrypted")
-        or (None if payload.clear_sms_api_key else row["sms_account_sid_encrypted"]),
+        values.get("sms_api_key")
+        or (None if payload.clear_sms_api_key else row["sms_api_key"]),
+        values.get("sms_account_sid")
+        or (None if payload.clear_sms_api_key else row["sms_account_sid"]),
         values.get("sms_sender_phone")
         or (None if payload.clear_sms_api_key else row["sms_sender_phone"]),
     )
@@ -599,13 +627,13 @@ async def update_admin_integration_settings(
             detail="Configure the Brevo API key, sender name, and verified sender email before enabling email.",
         )
     await db.execute(
-        update(admin_integration_settings_table)
-        .where(admin_integration_settings_table.c.id == row["id"])
+        update(notification_settings_table)
+        .where(notification_settings_table.c.id == row["id"])
         .values(**values)
     )
     updated = await db.execute(
-        select(admin_integration_settings_table).where(
-            admin_integration_settings_table.c.id == row["id"]
+        select(notification_settings_table).where(
+            notification_settings_table.c.id == row["id"]
         )
     )
     updated_row = updated.mappings().one()
@@ -688,7 +716,9 @@ async def list_admins(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]
 
 
 def _dump_product(payload: ProductInput) -> dict[str, Any]:
-    product = payload.model_dump(exclude={"id", "variants"})
+    product = payload.model_dump(exclude={
+        "id", "variants", "is_combo", "combo_catalog_products"
+    })
     for field in ("ingredients", "images", "categories"):
         product[field] = product.get(field) or []
     return product
@@ -852,6 +882,24 @@ async def _replace_variants(db: AsyncSession, product_id: UUID, variants: list[V
         )
         if {row[0] for row in existing} != ids:
             raise HTTPException(status_code=422, detail="Variant does not belong to this product.")
+    removed_result = await db.execute(
+        select(variants_table.c.id).where(
+            variants_table.c.product_id == product_id,
+            variants_table.c.id.not_in(ids) if ids else True,
+        )
+    )
+    removed_ids = [row[0] for row in removed_result]
+    if removed_ids:
+        combo_reference = await db.execute(
+            select(combo_catalog_products_table.c.combo_id)
+            .where(combo_catalog_products_table.c.variant_id.in_(removed_ids))
+            .limit(1)
+        )
+        if combo_reference.scalar_one_or_none() is not None:
+            raise HTTPException(
+                status_code=409,
+                detail="Remove this pack from its combos before deleting it.",
+            )
     await db.execute(delete(variants_table).where(
         variants_table.c.product_id == product_id,
         variants_table.c.id.not_in(ids) if ids else True,
@@ -868,6 +916,86 @@ async def _replace_variants(db: AsyncSession, product_id: UUID, variants: list[V
             ).values(**values))
 
 
+async def _validate_combo_catalog_products(
+    db: AsyncSession,
+    payload: ProductInput,
+) -> None:
+    variant_ids = [item.variant_id for item in payload.combo_catalog_products]
+    if len(set(variant_ids)) != len(variant_ids):
+        raise HTTPException(status_code=422, detail="A regular product pack can only be added once to a combo.")
+
+    catalog_rows: dict[UUID, dict[str, Any]] = {}
+    if variant_ids:
+        result = await db.execute(
+            select(
+                variants_table.c.id,
+                variants_table.c.product_id,
+                variants_table.c.mrp,
+                products_table.c.name,
+                products_table.c.status,
+            )
+            .join(products_table, products_table.c.id == variants_table.c.product_id)
+            .where(variants_table.c.id.in_(variant_ids))
+        )
+        catalog_rows = {row["id"]: dict(row) for row in result.mappings()}
+        if set(catalog_rows) != set(variant_ids):
+            raise HTTPException(status_code=422, detail="A selected regular product pack is unavailable.")
+
+    total_mrp = Decimal("0")
+    for item in payload.combo_catalog_products:
+        row = catalog_rows[item.variant_id]
+        if row["product_id"] != item.product_id:
+            raise HTTPException(status_code=422, detail="A selected pack does not match its product.")
+        if str(row["status"] or "active").lower() != "active":
+            raise HTTPException(status_code=422, detail=f"{row['name']} is not currently available.")
+        total_mrp += Decimal(str(row["mrp"])) * item.quantity
+
+    if payload.mrp != total_mrp:
+        raise HTTPException(
+            status_code=422,
+            detail="The combo MRP must equal the total value of its included packs.",
+        )
+    if payload.price >= total_mrp:
+        raise HTTPException(
+            status_code=422,
+            detail="The combo price must be lower than the combined regular price.",
+        )
+
+
+async def _replace_combo_catalog_products(
+    db: AsyncSession,
+    combo_id: UUID,
+    products: list[ComboCatalogProductInput],
+) -> None:
+    await db.execute(
+        delete(combo_catalog_products_table).where(combo_catalog_products_table.c.combo_id == combo_id)
+    )
+    for sort_order, item in enumerate(products):
+        await db.execute(
+            insert(combo_catalog_products_table).values(
+                combo_id=combo_id,
+                product_id=item.product_id,
+                variant_id=item.variant_id,
+                quantity=item.quantity,
+                sort_order=sort_order,
+            )
+        )
+
+
+async def _ensure_catalog_slug_available(
+    db: AsyncSession,
+    slug: str,
+    *,
+    exclude_id: UUID | None = None,
+) -> None:
+    for table in (products_table, combos_table):
+        statement = select(table.c.id).where(table.c.slug == slug)
+        if exclude_id is not None:
+            statement = statement.where(table.c.id != exclude_id)
+        if (await db.execute(statement)).scalar_one_or_none() is not None:
+            raise HTTPException(status_code=409, detail="A product or combo with that URL slug already exists.")
+
+
 async def _unique_error(db: AsyncSession, exc: IntegrityError) -> None:
     await db.rollback()
     raise HTTPException(status_code=409, detail="A product, category, SKU, or coupon with that identifier already exists.") from exc
@@ -877,13 +1005,26 @@ async def _unique_error(db: AsyncSession, exc: IntegrityError) -> None:
 async def admin_products(
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    result = await db.execute(select(products_table).order_by(products_table.c.name))
-    return await hydrate_products(db, [dict(row) for row in result.mappings()])
+    product_result = await db.execute(select(products_table).order_by(products_table.c.name))
+    combo_result = await db.execute(select(combos_table).order_by(combos_table.c.name))
+    products = [
+        {**dict(row), "is_combo": False}
+        for row in product_result.mappings()
+    ] + [
+        {**dict(row), "is_combo": True, "ingredients": []}
+        for row in combo_result.mappings()
+    ]
+    return await hydrate_products(db, products)
 
 
 @router.post("/products", status_code=201, dependencies=[Depends(require_admin)])
 async def create_product(payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    if payload.is_combo:
+        raise HTTPException(status_code=422, detail="Create combo listings through the combos endpoint.")
+    if payload.combo_catalog_products:
+        raise HTTPException(status_code=422, detail="Only combo listings can contain regular products.")
     try:
+        await _ensure_catalog_slug_available(db, payload.slug)
         values = _dump_product(payload)
         if payload.id is not None:
             values["id"] = payload.id
@@ -900,7 +1041,12 @@ async def create_product(payload: ProductInput, db: AsyncSession = Depends(get_d
 
 @router.put("/products/{product_id}", dependencies=[Depends(require_admin)])
 async def update_product(product_id: UUID, payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    if payload.is_combo:
+        raise HTTPException(status_code=422, detail="Update combo listings through the combos endpoint.")
+    if payload.combo_catalog_products:
+        raise HTTPException(status_code=422, detail="Only combo listings can contain regular products.")
     try:
+        await _ensure_catalog_slug_available(db, payload.slug, exclude_id=product_id)
         existing = await db.execute(
             select(products_table.c.id, products_table.c.images).where(products_table.c.id == product_id)
         )
@@ -925,9 +1071,221 @@ async def update_product(product_id: UUID, payload: ProductInput, db: AsyncSessi
 
 @router.delete("/products/{product_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
+    combo_reference = await db.execute(
+        select(combo_catalog_products_table.c.combo_id)
+        .where(combo_catalog_products_table.c.product_id == product_id)
+        .limit(1)
+    )
+    if combo_reference.scalar_one_or_none() is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Remove this product from its combos before deleting it.",
+        )
     result = await db.execute(delete(products_table).where(products_table.c.id == product_id))
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Product not found.")
+    await db.commit()
+
+
+@router.get("/combos", dependencies=[Depends(require_admin)])
+async def admin_combos(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+    result = await db.execute(select(combos_table).order_by(combos_table.c.name))
+    combos = [
+        {**dict(row), "is_combo": True, "ingredients": []}
+        for row in result.mappings()
+    ]
+    return await hydrate_products(db, combos)
+
+
+@router.post("/combos", status_code=201, dependencies=[Depends(require_admin)])
+async def create_combo(payload: ProductInput, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
+    if not payload.is_combo:
+        raise HTTPException(status_code=422, detail="Combo listings must be marked as combos.")
+    try:
+        await _validate_combo_catalog_products(db, payload)
+        await _ensure_catalog_slug_available(db, payload.slug)
+        values = _dump_product(payload)
+        values.pop("ingredients", None)
+        if payload.id is not None:
+            values["id"] = payload.id
+        values["created_at"] = datetime.now()
+        values["updated_at"] = datetime.now()
+        combo_id = (
+            await db.execute(
+                insert(combos_table)
+                .values(**values)
+                .returning(combos_table.c.id)
+            )
+        ).scalar_one()
+        await _replace_combo_catalog_products(db, combo_id, payload.combo_catalog_products)
+        await db.commit()
+    except IntegrityError as exc:
+        await _unique_error(db, exc)
+    result = await db.execute(select(combos_table).where(combos_table.c.id == combo_id))
+    combo = {**dict(result.mappings().one()), "is_combo": True, "ingredients": []}
+    return (await hydrate_products(db, [combo]))[0]
+
+
+@router.put("/combos/{combo_id}", dependencies=[Depends(require_admin)])
+async def update_combo(
+    combo_id: UUID,
+    payload: ProductInput,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    if not payload.is_combo:
+        raise HTTPException(status_code=422, detail="Combo listings must be marked as combos.")
+    try:
+        await _validate_combo_catalog_products(db, payload)
+        await _ensure_catalog_slug_available(db, payload.slug, exclude_id=combo_id)
+        existing = await db.execute(
+            select(combos_table.c.id, combos_table.c.images)
+            .where(combos_table.c.id == combo_id)
+        )
+        previous_combo = existing.mappings().first()
+        if previous_combo is None:
+            raise HTTPException(status_code=404, detail="Combo not found.")
+        values = _dump_product(payload)
+        values.pop("ingredients", None)
+        values["updated_at"] = datetime.now()
+        await db.execute(
+            update(combos_table)
+            .where(combos_table.c.id == combo_id)
+            .values(**values)
+        )
+        await _replace_combo_catalog_products(db, combo_id, payload.combo_catalog_products)
+        await db.commit()
+    except IntegrityError as exc:
+        await _unique_error(db, exc)
+    _delete_replaced_product_images(
+        combo_id,
+        previous_combo["images"],
+        values["images"],
+    )
+    result = await db.execute(select(combos_table).where(combos_table.c.id == combo_id))
+    combo = {**dict(result.mappings().one()), "is_combo": True, "ingredients": []}
+    return (await hydrate_products(db, [combo]))[0]
+
+
+@router.delete("/combos/{combo_id}", status_code=204, dependencies=[Depends(require_admin)])
+async def delete_combo(combo_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
+    result = await db.execute(delete(combos_table).where(combos_table.c.id == combo_id))
+    if not result.rowcount:
+        raise HTTPException(status_code=404, detail="Combo not found.")
+    await db.commit()
+
+
+@router.get("/recipes", dependencies=[Depends(require_admin)])
+async def admin_recipes(db: AsyncSession = Depends(get_db)) -> list[dict[str, Any]]:
+    result = await db.execute(select(recipes_table).order_by(recipes_table.c.title))
+    return [dict(row) for row in result.mappings()]
+
+
+@router.post("/recipes", status_code=201, dependencies=[Depends(require_admin)])
+async def create_recipe(
+    payload: RecipeInput,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        result = await db.execute(
+            insert(recipes_table)
+            .values(**payload.model_dump())
+            .returning(recipes_table)
+        )
+        recipe = dict(result.mappings().one())
+        await db.commit()
+        return recipe
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A recipe with that URL slug already exists.",
+        ) from exc
+
+
+async def _update_recipe_homepage_references(
+    db: AsyncSession,
+    old_slug: str,
+    new_slug: str | None,
+) -> None:
+    settings_id = (
+        select(homepage_settings_table.c.id)
+        .order_by(homepage_settings_table.c.id)
+        .limit(1)
+        .scalar_subquery()
+    )
+    settings_result = await db.execute(
+        select(homepage_settings_table.c.content)
+        .where(homepage_settings_table.c.id == settings_id)
+        .with_for_update()
+    )
+    homepage_content = settings_result.scalar_one_or_none()
+    if homepage_content is None:
+        return
+
+    homepage_content = dict(homepage_content)
+    recipe_content = dict(homepage_content.get("recipes") or {})
+    selected_slugs = recipe_content.get("recipe_slugs", [])
+    if new_slug is None:
+        recipe_content["recipe_slugs"] = [
+            slug for slug in selected_slugs if slug != old_slug
+        ]
+    else:
+        recipe_content["recipe_slugs"] = list(dict.fromkeys(
+            new_slug if slug == old_slug else slug
+            for slug in selected_slugs
+        ))
+    homepage_content["recipes"] = recipe_content
+    await db.execute(
+        update(homepage_settings_table)
+        .where(homepage_settings_table.c.id == settings_id)
+        .values(content=homepage_content, updated_at=datetime.now(timezone.utc))
+    )
+
+
+@router.put("/recipes/{recipe_id}", dependencies=[Depends(require_admin)])
+async def update_recipe(
+    recipe_id: UUID,
+    payload: RecipeInput,
+    db: AsyncSession = Depends(get_db),
+) -> dict[str, Any]:
+    try:
+        previous_result = await db.execute(
+            select(recipes_table.c.slug).where(recipes_table.c.id == recipe_id)
+        )
+        old_slug = previous_result.scalar_one_or_none()
+        if old_slug is None:
+            raise HTTPException(status_code=404, detail="Recipe not found.")
+        result = await db.execute(
+            update(recipes_table)
+            .where(recipes_table.c.id == recipe_id)
+            .values(**payload.model_dump())
+            .returning(recipes_table)
+        )
+        recipe = result.mappings().first()
+        if recipe is None:
+            raise HTTPException(status_code=404, detail="Recipe not found.")
+        if old_slug != payload.slug:
+            await _update_recipe_homepage_references(db, old_slug, payload.slug)
+        await db.commit()
+        return dict(recipe)
+    except IntegrityError as exc:
+        await db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="A recipe with that URL slug already exists.",
+        ) from exc
+
+
+@router.delete("/recipes/{recipe_id}", status_code=204, dependencies=[Depends(require_admin)])
+async def delete_recipe(recipe_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
+    recipe_result = await db.execute(
+        select(recipes_table.c.slug).where(recipes_table.c.id == recipe_id)
+    )
+    slug = recipe_result.scalar_one_or_none()
+    if slug is None:
+        raise HTTPException(status_code=404, detail="Recipe not found.")
+    await db.execute(delete(recipes_table).where(recipes_table.c.id == recipe_id))
+    await _update_recipe_homepage_references(db, slug, None)
     await db.commit()
 
 
@@ -1189,11 +1547,27 @@ async def admin_reviews(
     status: Literal["pending", "approved", "rejected"] | None = None,
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
-    statement = select(reviews_table).order_by(reviews_table.c.created_at.desc())
+    statement = (
+        select(
+            reviews_table,
+            products_table.c.name.label("product_name"),
+            combos_table.c.name.label("combo_name"),
+        )
+        .outerjoin(products_table, products_table.c.id == reviews_table.c.product_id)
+        .outerjoin(combos_table, combos_table.c.id == reviews_table.c.combo_id)
+        .order_by(reviews_table.c.created_at.desc())
+    )
     if status:
         statement = statement.where(reviews_table.c.status == status)
     result = await db.execute(statement)
-    return [dict(row) for row in result.mappings()]
+    reviews = []
+    for row in result.mappings():
+        review = dict(row)
+        product_name = review.pop("product_name")
+        combo_name = review.pop("combo_name")
+        review["product_name"] = product_name or combo_name
+        reviews.append(review)
+    return reviews
 
 
 @router.put("/reviews/{review_id}", dependencies=[Depends(require_admin)])

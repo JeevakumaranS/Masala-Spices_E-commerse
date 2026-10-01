@@ -1,4 +1,4 @@
-import type { Category, Product } from "@/lib/types";
+import type { Category, HomepageContent, Product } from "@/lib/types";
 
 import { apiClient, getApiErrorMessage } from "@/lib/http";
 
@@ -68,7 +68,8 @@ export type AdminCoupon = {
 
 export type AdminReview = {
   id: string;
-  product_id: string;
+  product_id?: string | null;
+  combo_id?: string | null;
   product_name?: string;
   reviewer_name: string;
   rating: number;
@@ -140,6 +141,53 @@ export type AdminTwilioCredentials = {
   auth_token: string;
   sender_phone: string;
 };
+
+export type HomepageMediaUpload = {
+  image_key: string;
+  image_url: string;
+};
+
+export type HomepageMediaSyncResult = {
+  content: HomepageContent;
+  uploaded_count: number;
+  already_in_rustfs_count: number;
+  product_count: number;
+};
+
+export async function uploadHomepageMedia(file: File, token: string): Promise<HomepageMediaUpload> {
+  const formData = new FormData();
+  formData.append("file", file);
+  try {
+    const response = await apiClient.post<HomepageMediaUpload>(
+      "/api/admin/homepage-media",
+      formData,
+      { headers: { Authorization: `Bearer ${token}` } },
+    );
+    return response.data;
+  } catch (error) {
+    throw new Error(getApiErrorMessage(error, "Homepage image upload failed."));
+  }
+}
+
+export function syncHomepageImagesToRustfs(token: string): Promise<HomepageMediaSyncResult> {
+  return adminRequest<HomepageMediaSyncResult>("/api/admin/homepage-media/sync", token, {
+    method: "POST",
+  });
+}
+
+export function getAdminHomepageContent(token: string): Promise<HomepageContent> {
+  return adminRequest<HomepageContent>("/api/admin/homepage-content", token);
+}
+
+export function saveAdminHomepageContent(
+  content: HomepageContent,
+  token: string,
+): Promise<HomepageContent> {
+  return adminRequest<HomepageContent>("/api/admin/homepage-content", token, {
+    method: "PUT",
+    body: JSON.stringify(content),
+  });
+}
 
 export async function uploadAdminHeroImage(
   file: File,

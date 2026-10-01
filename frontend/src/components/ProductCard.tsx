@@ -12,21 +12,34 @@ type Props = {
   priority?: boolean;
   /** `compact` drops the description for denser grids. */
   density?: "comfortable" | "compact";
+  /** Reduced decoration and motion for the homepage bestseller rail. */
+  cardStyle?: "default" | "bestseller";
+  imageOverride?: string;
   className?: string;
 };
 
-export function ProductCard({ product, priority = false, density = "comfortable", className }: Props) {
+export function ProductCard({
+  product,
+  priority = false,
+  density = "comfortable",
+  cardStyle = "default",
+  imageOverride,
+  className,
+}: Props) {
   const href = `/collections/${product.categories[0] ?? "all"}/products/${product.slug}`;
-  const image = product.images[0]?.url;
+  const image = imageOverride || product.images[0]?.url;
   const off = percentOff(product.price, product.mrp);
   const variant = product.variants[0] ?? null;
   const stock = variant?.stock_qty ?? 0;
+  const bestsellerStyle = cardStyle === "bestseller";
 
   return (
     <article
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-2xl border border-paper-200 bg-white transition-all duration-300",
-        "hover:-translate-y-1 hover:border-paper-300 hover:shadow-lg",
+        "group relative flex flex-col overflow-hidden rounded-2xl bg-white",
+        bestsellerStyle
+          ? "transition-shadow duration-200 hover:shadow-sm"
+          : "border border-paper-200 transition-all duration-300 hover:-translate-y-1 hover:border-paper-300 hover:shadow-lg",
         className,
       )}
     >
@@ -36,7 +49,8 @@ export function ProductCard({ product, priority = false, density = "comfortable"
           alt={product.name}
           aspect={density === "compact" ? "aspect-square" : "aspect-[4/5]"}
           priority={priority}
-          zoom
+          zoom={!bestsellerStyle}
+          className={bestsellerStyle ? "group-hover:scale-[1.02] !duration-200" : undefined}
           sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 20vw"
           wrapperClassName="transition-colors"
         />
@@ -49,7 +63,7 @@ export function ProductCard({ product, priority = false, density = "comfortable"
           ) : null}
         </div>
 
-        {image ? (
+        {image && !bestsellerStyle ? (
           <span className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink-950/55 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" aria-hidden="true" />
         ) : null}
       </Link>
@@ -79,7 +93,8 @@ export function ProductCard({ product, priority = false, density = "comfortable"
 
         <h3
           className={cn(
-            "mt-3 line-clamp-2 font-display leading-snug font-semibold text-ink-950 transition-colors group-hover:text-masala-800",
+            "mt-3 line-clamp-2 font-display leading-snug font-semibold text-ink-950",
+            !bestsellerStyle && "transition-colors group-hover:text-masala-800",
             density === "compact" ? "text-[0.95rem]" : "text-lg",
           )}
         >
@@ -119,7 +134,12 @@ export function ProductCard({ product, priority = false, density = "comfortable"
           </div>
 
           {/* Quick add — always visible on mobile, revealed on hover at md+ */}
-          <div className="mt-3 md:translate-y-1.5 md:opacity-0 md:transition-all md:duration-300 md:group-hover:translate-y-0 md:group-hover:opacity-100 md:focus-within:translate-y-0 md:focus-within:opacity-100">
+          <div className={cn(
+            "mt-3 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100",
+            bestsellerStyle
+              ? "md:transition-opacity md:duration-200"
+              : "md:translate-y-1.5 md:transition-all md:duration-300 md:group-hover:translate-y-0 md:focus-within:translate-y-0",
+          )}>
             <AddToCartButton
               product={product}
               variant={variant}

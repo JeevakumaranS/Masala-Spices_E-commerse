@@ -34,8 +34,13 @@ export function ProductPurchasePanel({ product }: Props) {
   const price = selected?.price ?? product.price;
   const mrp = selected?.mrp ?? product.mrp;
   const off = percentOff(price, mrp);
-  const stock = selected?.stock_qty ?? 0;
-  const inStock = selected ? selected.stock_qty > 0 : true;
+  const bundleStock = product.is_combo
+    ? product.combo_catalog_products.length
+      ? Math.min(...product.combo_catalog_products.map((item) => Math.floor(item.stock_qty / item.quantity)))
+      : 0
+    : null;
+  const stock = bundleStock ?? selected?.stock_qty ?? 0;
+  const inStock = stock > 0 || (!product.is_combo && !selected);
   const maxQty = Math.max(1, Math.min(stock || 20, 20));
   const perMeal = product.meal_cost ?? (product.categories.some((category) => category.includes("kit") || category.includes("combo")) ? Math.ceil(price / 4) : null);
 
@@ -105,6 +110,22 @@ export function ProductPurchasePanel({ product }: Props) {
       </div>
 
       <p className="mt-5 text-base leading-relaxed text-ink-600">{product.description}</p>
+      {product.combo_catalog_products.length ? (
+        <section className="mt-5 rounded-2xl border border-paper-200 bg-paper-50 p-4">
+          <h2 className="text-sm font-bold text-ink-900">Included in this combo</h2>
+          <ul className="mt-2 space-y-2">
+            {product.combo_catalog_products.map((item) => (
+              <li key={`catalog-${item.id}`} className="flex items-center justify-between gap-3 text-sm">
+                <span className="text-ink-700">{item.quantity} × {item.name} · {item.pack_size}</span>
+                <span className="shrink-0 font-medium text-ink-900">{formatINR(item.mrp * item.quantity)}</span>
+              </li>
+            ))}
+          </ul>
+          <p className="mt-3 border-t border-paper-200 pt-3 text-xs font-semibold text-cardamom-700">
+            Bundle savings: {formatINR(Math.max(0, mrp - price))}
+          </p>
+        </section>
+      ) : null}
 
       {/* ---- Pack-size selector ---- */}
       <div className="mt-7">
