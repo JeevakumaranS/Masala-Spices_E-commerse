@@ -3,6 +3,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { adminRequest, uploadHomepageMedia } from "@/lib/admin";
 import type { Recipe } from "@/lib/types";
+import { Pagination } from "@/components/ui/Pagination";
 import { SmartImage } from "@/components/ui/SmartImage";
 import { PlusIcon } from "@/components/ui/icons";
 
@@ -13,6 +14,7 @@ const primaryButton =
   "inline-flex items-center justify-center gap-2 rounded-xl bg-masala-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-masala-800 disabled:cursor-not-allowed disabled:opacity-50";
 const secondaryButton =
   "inline-flex items-center justify-center gap-2 rounded-xl border border-paper-200 bg-white px-4 py-2.5 text-sm font-semibold text-ink-700 transition hover:border-masala-300 disabled:cursor-not-allowed disabled:opacity-50";
+const PAGE_SIZE = 10;
 
 type RecipeDraft = {
   id?: string;
@@ -40,6 +42,7 @@ export function RecipesManagement({ token }: { token: string }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+  const [page, setPage] = useState(1);
 
   const loadRecipes = async () => {
     const payload = await adminRequest<{ items?: Recipe[] } | Recipe[]>("/api/recipes", token);
@@ -152,6 +155,10 @@ export function RecipesManagement({ token }: { token: string }) {
     }
   };
 
+  const pageCount = Math.max(1, Math.ceil(recipes.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleRecipes = recipes.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
   return (
     <section className="mt-7 space-y-5">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -217,7 +224,7 @@ export function RecipesManagement({ token }: { token: string }) {
 
       {loading ? <p role="status" className="text-sm text-ink-500">Loading recipes…</p> : recipes.length ? (
         <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {recipes.map((recipe) => (
+          {visibleRecipes.map((recipe) => (
             <article key={recipe.id} className="rounded-xl border border-paper-200 bg-white p-3">
               <SmartImage src={recipe.hero_image_url} alt={recipe.title} aspect="aspect-video" sizes="(max-width: 768px) 100vw, 33vw" wrapperClassName="rounded-lg" zoom={false} />
               <h3 className="mt-3 font-semibold text-ink-900">{recipe.title}</h3>
@@ -231,6 +238,16 @@ export function RecipesManagement({ token }: { token: string }) {
           ))}
         </div>
       ) : !loading ? <p className="rounded-2xl border border-dashed border-paper-300 bg-white px-5 py-10 text-center text-sm text-ink-500">No recipes yet. Add a recipe to get started.</p> : null}
+      {!loading && recipes.length > 0 ? (
+        <Pagination
+          page={currentPage}
+          pageSize={PAGE_SIZE}
+          total={recipes.length}
+          itemLabel="recipes"
+          ariaLabel="Admin recipes pagination"
+          onPageChange={setPage}
+        />
+      ) : null}
     </section>
   );
 }

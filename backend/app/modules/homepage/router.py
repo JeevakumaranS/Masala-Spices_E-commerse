@@ -33,7 +33,15 @@ from app.services.storage import (
 
 router = APIRouter(tags=["homepage"])
 logger = logging.getLogger(__name__)
-_IMAGE_IMPORT_HOSTS = {"images.unsplash.com", "imgs.search.brave.com"}
+_IMAGE_IMPORT_HOSTS = {
+    "images.unsplash.com",
+    "imgs.search.brave.com",
+    "shop.cookdtv.com",
+    "img.magnific.com",
+    "tiimg.tistatic.com",
+    "images.jdmagicbox.com",
+    "assets.cookdtv.com",
+}
 _MAX_IMPORTED_IMAGE_BYTES = 12 * 1024 * 1024
 _IMAGE_EXTENSIONS = {
     "image/jpeg": "jpg",
@@ -137,6 +145,27 @@ async def _load_content(db: AsyncSession) -> HomePageContent:
     stored = result.scalar_one_or_none()
     if stored is None:
         return DEFAULT_HOME_PAGE_CONTENT.model_copy(deep=True)
+    stored = dict(stored)
+    combo_content = dict(stored.get("combos") or {})
+    combo_slugs = combo_content.get("product_slugs", [])
+    offer_codes = combo_content.get("offer_codes", [])
+    combo_content["product_slugs"] = list(dict.fromkeys(
+        slug for slug in combo_slugs if isinstance(slug, str)
+    ))[:4] if isinstance(combo_slugs, list) else []
+    remaining_slots = 4 - len(combo_content["product_slugs"])
+    combo_content["offer_codes"] = list(dict.fromkeys(
+        code for code in offer_codes if isinstance(code, str)
+    ))[:remaining_slots] if isinstance(offer_codes, list) else []
+    stored["combos"] = combo_content
+    recipe_content = dict(stored.get("recipes") or {})
+    selected_slugs = recipe_content.get("recipe_slugs", [])
+    if isinstance(selected_slugs, list):
+        recipe_content["recipe_slugs"] = list(dict.fromkeys(
+            slug for slug in selected_slugs if isinstance(slug, str)
+        ))[:4]
+    else:
+        recipe_content["recipe_slugs"] = []
+    stored["recipes"] = recipe_content
     return HomePageContent.model_validate(stored)
 
 

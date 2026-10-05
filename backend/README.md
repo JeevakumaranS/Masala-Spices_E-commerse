@@ -37,10 +37,11 @@ backend/
 3. Add development data in `data.py` when the module needs seed data.
 4. Register the router in `app/api/router.py`.
 
-Run the application from this directory with:
+Use Python 3.12, matching `Dockerfile`. After activating the virtual environment
+and installing `requirements.txt`, run the application from this directory with:
 
 ```bash
-.venv\Scripts\python.exe -m uvicorn app.main:app --port 8080
+python -m uvicorn app.main:app --reload --port 8080
 ```
 
 ## Environment and database setup
@@ -59,7 +60,7 @@ Admin bearer tokens are signed HS256 JWTs. Their lifetime is controlled by
 when the corresponding administrator is inactive or no longer exists.
 
 To create an administrator directly from the backend CLI, run
-`.venv\Scripts\python.exe -m app.cli create-admin`. The CLI prompts for the
+`python -m app.cli create-admin`. The CLI prompts for the
 email and a password twice without echoing the password. Supply `--email
 admin@example.com` to skip the email prompt; password entry remains interactive.
 
@@ -69,15 +70,15 @@ Install the development dependencies and run the API smoke tests from the
 `backend` directory. The collection endpoint tests use the configured local
 database; they only issue read requests. Notification providers are not called.
 
-```powershell
-.\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
-.\.venv\Scripts\python.exe -m pytest
+```bash
+python -m pip install -r requirements-dev.txt
+python -m pytest
 ```
 
 Apply schema changes after configuring the database:
 
-```powershell
-.\.venv\Scripts\python.exe -m alembic upgrade head
+```bash
+alembic upgrade head
 ```
 
 Use PostgreSQL 18 or later. Primary keys are UUIDv7; list-valued catalog,

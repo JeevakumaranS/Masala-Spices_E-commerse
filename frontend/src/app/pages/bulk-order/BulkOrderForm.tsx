@@ -5,6 +5,7 @@ import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { useUIStore } from "@/store/ui";
+import { apiClient } from "@/lib/http";
 import { ArrowRightIcon, CheckCircleIcon } from "@/components/ui/icons";
 
 const VOLUMES = [
@@ -79,8 +80,16 @@ export function BulkOrderForm() {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         throw new Error("offline");
       }
-      // Demo submission — no quote API is wired up yet.
-      await new Promise((resolve) => setTimeout(resolve, 800));
+      await apiClient.post("/api/enquiries", {
+        name: values.contactName,
+        email: values.email,
+        phone: values.phone,
+        company_name: values.companyName,
+        subject: "Bulk orders",
+        message: values.requirements,
+        source: "bulk_order",
+        details: { monthly_volume: values.volume },
+      });
 
       const firstName = values.contactName.split(" ")[0];
       reset();

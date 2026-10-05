@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import Link from "next/link";
 import type { Recipe } from "@/lib/types";
 import { EmptyState } from "@/components/ui/EmptyState";
+import { Pagination } from "@/components/ui/Pagination";
 import { Reveal } from "@/components/ui/Reveal";
 import { SmartImage } from "@/components/ui/SmartImage";
 import {
@@ -15,6 +16,7 @@ import {
 } from "@/components/ui/icons";
 
 type TimeBucket = "u30" | "30-60" | "60+";
+const PAGE_SIZE = 12;
 
 const TIME_BUCKETS: { value: TimeBucket; label: string }[] = [
   { value: "u30", label: "Under 30 minutes" },
@@ -111,6 +113,7 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
   const [dishType, setDishType] = useState<string | null>(null);
   const [time, setTime] = useState<TimeBucket | null>(null);
   const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
 
   const hasFilters = cuisine !== null || dishType !== null || time !== null || search.trim() !== "";
 
@@ -119,6 +122,7 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
     setDishType(null);
     setTime(null);
     setSearch("");
+    setPage(1);
   };
 
   const filtered = recipes.filter((recipe) => {
@@ -143,6 +147,9 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
     return true;
   });
 
+  const pageCount = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, pageCount);
+  const visibleRecipes = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
   const timeOptions = TIME_BUCKETS.map(({ value, label }) => ({ value, label }));
 
   return (
@@ -159,7 +166,10 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
                 <input
                   type="search"
                   value={search}
-                  onChange={(event) => setSearch(event.target.value)}
+                  onChange={(event) => {
+                    setSearch(event.target.value);
+                    setPage(1);
+                  }}
                   placeholder="Search recipes"
                   aria-label="Search recipes and ingredients"
                   className="h-10 w-full rounded-xl border border-paper-200 bg-white pr-3 pl-9 text-sm text-ink-900 shadow-xs placeholder:text-ink-400 focus:border-masala-400 focus:outline-none focus:ring-2 focus:ring-masala-100"
@@ -167,23 +177,30 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
               </label>
               <FilterSelect
                 value={cuisine ?? ""}
-                onClick={(value) => setCuisine(value || null)}
+                onClick={(value) => {
+                  setCuisine(value || null);
+                  setPage(1);
+                }}
                 options={cuisines.map((value) => ({ value, label: value }))}
                 placeholder="All cuisines"
                 ariaLabel="Filter by cuisine"
               />
               <FilterSelect
                 value={dishType ?? ""}
-                onClick={(value) => setDishType(value || null)}
+                onClick={(value) => {
+                  setDishType(value || null);
+                  setPage(1);
+                }}
                 options={dishTypes.map((value) => ({ value, label: value }))}
                 placeholder="All dish types"
                 ariaLabel="Filter by dish type"
               />
               <FilterSelect
                 value={time ?? ""}
-                onClick={(value) =>
+                onClick={(value) => {
                   setTime(TIME_BUCKETS.find((bucket) => bucket.value === value)?.value ?? null)
-                }
+                  setPage(1);
+                }}
                 options={timeOptions}
                 placeholder="Any cook time"
                 ariaLabel="Filter by cooking time"
@@ -215,13 +232,8 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
           />
         ) : (
           <>
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <p role="status" className="text-xs text-ink-500">
-                Showing{" "}
-                <span className="font-semibold text-ink-900">{filtered.length}</span> of{" "}
-                {recipes.length} recipes
-              </p>
-              {hasFilters && filtered.length > 0 ? (
+            {hasFilters && filtered.length > 0 ? (
+              <div className="flex justify-end">
                 <button
                   type="button"
                   onClick={clearFilters}
@@ -230,8 +242,8 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
                   <CloseIcon className="size-3" />
                   Clear
                 </button>
-              ) : null}
-            </div>
+              </div>
+            ) : null}
 
             {filtered.length === 0 ? (
               <div className="mt-6 flex flex-col items-center">
@@ -252,13 +264,23 @@ export function RecipeBrowser({ recipes }: { recipes: Recipe[] }) {
               </div>
             ) : (
               <div className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-                {filtered.map((recipe, index) => (
+                {visibleRecipes.map((recipe, index) => (
                   <Reveal key={recipe.slug} delay={(index % 3) * 80} className="h-full">
                     <RecipeCard recipe={recipe} />
                   </Reveal>
                 ))}
               </div>
             )}
+            {filtered.length > 0 ? (
+              <Pagination
+                page={currentPage}
+                pageSize={PAGE_SIZE}
+                total={filtered.length}
+                itemLabel="recipes"
+                ariaLabel="Recipes pagination"
+                onPageChange={setPage}
+              />
+            ) : null}
           </>
         )}
       </section>

@@ -1,19 +1,10 @@
-import { unstable_cache } from "next/cache";
 import type { BlogPost } from "@/lib/types";
 import { apiClient } from "@/lib/http";
 
-const getCachedBlogData = unstable_cache(
-  async (path: string) => {
-    const response = await apiClient.get<unknown>(path);
-    return response.data;
-  },
-  ["backend-blog"],
-  { revalidate: 600 },
-);
-
 export async function getBlogPosts(): Promise<BlogPost[]> {
   try {
-    const data = await getCachedBlogData("/api/blog");
+    const response = await apiClient.get<unknown>("/api/blog");
+    const data = response.data;
     return Array.isArray(data) ? (data as BlogPost[]) : [];
   } catch {
     return [];
@@ -22,7 +13,8 @@ export async function getBlogPosts(): Promise<BlogPost[]> {
 
 export async function getBlogPost(slug: string): Promise<BlogPost | null> {
   try {
-    return (await getCachedBlogData(`/api/blog/${encodeURIComponent(slug)}`)) as BlogPost;
+    const response = await apiClient.get<BlogPost>(`/api/blog/${encodeURIComponent(slug)}`);
+    return response.data;
   } catch {
     return null;
   }

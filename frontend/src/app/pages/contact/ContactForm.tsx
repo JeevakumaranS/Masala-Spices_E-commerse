@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
+import { apiClient } from "@/lib/http";
 import { ArrowRightIcon, CheckCircleIcon } from "@/components/ui/icons";
 
 const SUBJECTS = ["General", "Order issue", "Wholesale", "Export"] as const;
@@ -39,14 +40,19 @@ export function ContactForm() {
     mode: "onTouched",
   });
 
-  const onSubmit = async () => {
+  const onSubmit = async (values: ContactValues) => {
     setSubmitError(null);
     try {
       if (typeof navigator !== "undefined" && !navigator.onLine) {
         throw new Error("offline");
       }
-      // Demo submission — no mail backend is wired up yet.
-      await new Promise((resolve) => setTimeout(resolve, 700));
+      await apiClient.post("/api/enquiries", {
+        name: values.name,
+        email: values.email,
+        subject: values.subject,
+        message: values.message,
+        source: "contact",
+      });
       reset();
       setSent(true);
     } catch {

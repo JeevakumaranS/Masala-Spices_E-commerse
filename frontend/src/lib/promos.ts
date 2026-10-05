@@ -31,7 +31,7 @@ export async function validatePromoCode(
         code: normalized,
         items: lines.map((line) => ({
           product_id: line.id,
-          variant_id: line.variantId ?? 0,
+          variant_id: line.variantId,
           qty: line.qty,
         })),
       },

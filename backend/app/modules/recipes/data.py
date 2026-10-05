@@ -2,8 +2,6 @@
 
 from typing import Any
 
-from app.common.images import unsplash
-
 sample_recipes: list[dict[str, Any]] = [
     {
         "title": "Coconut Sambar",
@@ -22,7 +20,7 @@ sample_recipes: list[dict[str, Any]] = [
             "Add vegetables and masala.",
             "Finish with coconut and tempering.",
         ],
-        "hero_image_url": unsplash("photo-1546833999-b9f581a1996d"),
+        "hero_image_url": "https://assets.cookdtv.com/t/640/ldx8aj6mt1fuoglnl8w2qt6hwp79",
     },
     {
         "title": "Restaurant Style Biryani",
@@ -41,7 +39,7 @@ sample_recipes: list[dict[str, Any]] = [
             "Layer with rice and masala.",
             "Steam until aromatic.",
         ],
-        "hero_image_url": unsplash("photo-1563379091339-03b21ab4a4f8"),
+        "hero_image_url": "https://assets.cookdtv.com/t/640/9kfs1c7kdc2yhdf3wkw11hhz0qps",
     },
     {
         "title": "Chettinad Pepper Chicken",
@@ -60,7 +58,7 @@ sample_recipes: list[dict[str, Any]] = [
             "Brown the chicken with curry leaf.",
             "Simmer until the oil separates.",
         ],
-        "hero_image_url": unsplash("photo-1585937421612-70a008356fbe"),
+        "hero_image_url": "https://assets.cookdtv.com/t/640/h1tptzz54vtqe1pcoa9uzokqjyz8",
     },
     {
         "title": "Podi Idli",
@@ -79,7 +77,7 @@ sample_recipes: list[dict[str, Any]] = [
             "Toss hot idli in ghee and podi.",
             "Rest two minutes so it clings.",
         ],
-        "hero_image_url": unsplash("photo-1631209121750-a9f656d28f46"),
+        "hero_image_url": "https://assets.cookdtv.com/t/640/1gdaga1acfyx4vc95p2q2b7f6pdc",
     },
     {
         "title": "Weeknight Pav Bhaji",
@@ -98,7 +96,7 @@ sample_recipes: list[dict[str, Any]] = [
             "Fry onion, then bloom the masala.",
             "Finish with butter and a squeeze of lime.",
         ],
-        "hero_image_url": unsplash("photo-1567188040759-fb8a883dc6d8"),
+        "hero_image_url": "https://assets.cookdtv.com/t/640/s1b2obtt0cja1f1wkkid9b63igev",
     },
     {
         "title": "Coconut Rasam",
@@ -117,6 +115,6 @@ sample_recipes: list[dict[str, Any]] = [
             "Stir in the podi off the heat.",
             "Add coconut and a final tempering.",
         ],
-        "hero_image_url": unsplash("photo-1512058564366-18510be2db19"),
+        "hero_image_url": "https://assets.cookdtv.com/t/640/vfnxffhtj9jng8u6zbc5plepyw0a",
     },
 ]

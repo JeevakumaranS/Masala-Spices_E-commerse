@@ -9,6 +9,11 @@ import { LeafIcon } from "@/components/ui/icons";
 const ALLOWED_HOSTS = new Set([
   "images.unsplash.com",
   "plus.unsplash.com",
+  "shop.cookdtv.com",
+  "img.magnific.com",
+  "tiimg.tistatic.com",
+  "images.jdmagicbox.com",
+  "assets.cookdtv.com",
   "localhost",
   "127.0.0.1",
 ]);
@@ -20,6 +25,15 @@ function isRenderable(src: string): boolean {
     const url = new URL(src);
     if (url.protocol !== "http:" && url.protocol !== "https:") return false;
     return ALLOWED_HOSTS.has(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isLocalRustfsImage(src: string): boolean {
+  try {
+    const url = new URL(src);
+    return (url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "9000";
   } catch {
     return false;
   }
@@ -68,6 +82,7 @@ export function SmartImage({
           alt={alt}
           fill
           sizes={sizes}
+          unoptimized={isLocalRustfsImage(src ?? "")}
           priority={preload ? undefined : priority}
           preload={preload}
           loading={preload ? undefined : priority ? "eager" : "lazy"}

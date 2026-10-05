@@ -1,8 +1,6 @@
-version: '3.9'
-
 services:
   db:
-    image: postgres:16-alpine
+    image: postgres:18-alpine
     container_name: masala-postgres
     restart: unless-stopped
     environment:
@@ -10,9 +8,14 @@ services:
       POSTGRES_USER: masala
       POSTGRES_PASSWORD: masala123
     ports:
-      - "5432:5432"
+      - "5433:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data_pg18:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U masala -d masala_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   backend:
     container_name: masala-backend
@@ -24,7 +27,9 @@ services:
     environment:
       DATABASE_URL: postgresql+asyncpg://masala:masala123@db:5432/masala_db
     depends_on:
-      - db
+      db:
+        condition: service_healthy
+    command: sh -c "alembic upgrade head && python scripts/seed_data.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
       - "8000:8000"
 
@@ -32,9 +37,9 @@ services:
     container_name: masala-frontend
     build:
       context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://backend:8000
     restart: unless-stopped
-    env_file:
-      - ./frontend/.env
     environment:
       NEXT_PUBLIC_API_URL: http://backend:8000
       API_PROXY_TARGET: http://backend:8000
@@ -44,4 +49,4 @@ services:
       - "3000:3000"
 
 volumes:
-  postgres_data:
+  postgres_data_pg18:

@@ -33,6 +33,31 @@ const nextConfig: NextConfig = {
         pathname: "/**",
       },
       {
+        protocol: "https",
+        hostname: "shop.cookdtv.com",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "img.magnific.com",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "tiimg.tistatic.com",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "images.jdmagicbox.com",
+        pathname: "/**",
+      },
+      {
+        protocol: "https",
+        hostname: "assets.cookdtv.com",
+        pathname: "/**",
+      },
+      {
         protocol: "http",
         hostname: "localhost",
         port: "8000",

@@ -8,7 +8,7 @@ import { SmartImage } from "@/components/ui/SmartImage";
 import { ArrowLeftIcon, ArrowRightIcon } from "@/components/ui/icons";
 import { getBlogPost, getBlogPosts } from "@/lib/blog-api";
 
-export const revalidate = 600;
+export const dynamic = "force-dynamic";
 
 /** Resolve the post before HTML streaming so missing posts return a real 404. */
 export async function generateMetadata({

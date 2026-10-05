@@ -16,8 +16,8 @@ const COLUMNS = [
     title: "Shop",
     links: [
       { label: "Breakfast Masalas", href: "/collections/breakfast-masalas" },
-      { label: "Everyday Blends", href: "/collections/everyday-blends" },
-      { label: "Whole Spices", href: "/collections/whole-spices" },
+      { label: "Everyday Blends", href: "/collections/spice-blends" },
+      { label: "Whole Spices", href: "/pages/carry-home" },
       { label: "Bulk Orders", href: "/pages/bulk-order" },
       { label: "Export Enquiries", href: "/pages/export" },
     ],
@@ -80,7 +80,14 @@ export function Footer() {
           <ul className="mt-6 space-y-2.5 text-sm text-[#F0DCC8]">
             <li className="flex items-start gap-2.5">
               <MapPinIcon className="mt-0.5 size-4 shrink-0 text-[#E8865A]" />
-              14 Mill Road, Egmore, Chennai 600008
+              <a
+                href="https://www.google.com/maps/search/?api=1&query=14+Mill+Road%2C+Egmore%2C+Chennai+600008"
+                target="_blank"
+                rel="noreferrer noopener"
+                className="transition hover:text-[#FFA469]"
+              >
+                14 Mill Road, Egmore, Chennai 600008
+              </a>
             </li>
             <li className="flex items-start gap-2.5">
               <PhoneIcon className="mt-0.5 size-4 shrink-0 text-[#E8865A]" />
@@ -90,9 +97,14 @@ export function Footer() {
             </li>
             <li className="flex items-start gap-2.5">
               <MailIcon className="mt-0.5 size-4 shrink-0 text-[#E8865A]" />
-              <a href="mailto:hello@masalahouse.in" className="transition hover:text-[#FFA469]">
-                hello@masalahouse.in
-              </a>
+              <div className="flex flex-col items-start gap-1">
+                <a
+                  href="mailto:hello@masalahouse.in"
+                  className="transition hover:text-[#FFA469]"
+                >
+                  hello@masalahouse.in
+                </a>
+              </div>
             </li>
           </ul>
 

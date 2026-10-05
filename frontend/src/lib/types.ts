@@ -100,6 +100,7 @@ export type HomepageContent = {
     title: string;
     description: string;
     product_slugs: string[];
+    offer_codes: string[];
   };
   recipes: {
     eyebrow: string;
@@ -121,10 +122,11 @@ export type ActiveOffer = {
   buy_quantity: number;
   free_quantity: number;
   first_order_only: boolean;
+  starts_at?: string | null;
+  ends_at?: string | null;
 };
 
 export type BlogPost = {
-  /** Only returned by the list endpoint (`GET /api/blog`). */
   id?: string;
   title: string;
   slug: string;
@@ -134,4 +136,5 @@ export type BlogPost = {
   /** Optional editorial metadata; not every API response includes these. */
   category?: string | null;
   published_at?: string | null;
+  status?: "draft" | "published";
 };

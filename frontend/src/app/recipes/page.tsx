@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { getRecipes } from "@/lib/api";
 import { RecipeBrowser } from "./RecipeBrowser";
 
-export const revalidate = 600;
+export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
   title: "Recipes",

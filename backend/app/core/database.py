@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from sqlalchemy import (
     JSON,
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -272,7 +273,39 @@ recipes_table = Table(
     Column("ingredients", ARRAY(String)),
     Column("steps", ARRAY(String)),
     Column("hero_image_url", Text),
-    Column("video_url", Text),
+    Column("video_url", Text)
+)
+blog_posts_table = Table(
+    "blog_posts",
+    metadata,
+    Column("id", Uuid, primary_key=True, default=_uuid7_default, server_default=text("uuidv7()")),
+    Column("title", String(255), nullable=False),
+    Column("slug", String(255), nullable=False),
+    Column("category", String(120), nullable=False),
+    Column("published_at", Date, nullable=False),
+    Column("hero_image_url", Text, nullable=False),
+    Column("body", Text, nullable=False),
+    Column("status", String(20), nullable=False, default="draft", server_default="draft"),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    Column("updated_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    UniqueConstraint("slug", name="uq_blog_posts_slug"),
+)
+messages_table = Table(
+    "messages",
+    metadata,
+    Column("id", Uuid, primary_key=True, default=_uuid7_default, server_default=text("uuidv7()")),
+    Column("name", String(160), nullable=False),
+    Column("email", String(254), nullable=False),
+    Column("phone", String(24)),
+    Column("company_name", String(255)),
+    Column("subject", String(80), nullable=False),
+    Column("message", Text, nullable=False),
+    Column("source", String(32), nullable=False),
+    Column("details", JSON, nullable=False, default=dict, server_default=text("'{}'")),
+    Column("status", String(20), nullable=False, default="new", server_default="new"),
+    Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
+    CheckConstraint("status IN ('new', 'read')", name="ck_messages_status"),
+    CheckConstraint("source IN ('contact', 'bulk_order')", name="ck_messages_source"),
 )
 
 

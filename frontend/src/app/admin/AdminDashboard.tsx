@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import type { SelectHTMLAttributes } from "react";
 import Link from "next/link";
 import {
   AdminCategory,
@@ -23,7 +24,12 @@ import {
   registerAdmin,
 } from "@/lib/admin";
 import { HomepageManagement } from "@/app/admin/HomepageManagement";
+import { BlogManagement } from "@/app/admin/BlogManagement";
+import { MessagesManagement } from "@/app/admin/MessagesManagement";
 import { RecipesManagement } from "@/app/admin/RecipesManagement";
+import { Pagination as ListPagination } from "@/components/ui/Pagination";
+import { SelectField } from "@/components/ui/SelectField";
+import { SmartImage } from "@/components/ui/SmartImage";
 import {
   ArrowRightIcon,
   BagIcon,
@@ -33,11 +39,13 @@ import {
   FlameIcon,
   HomeIcon,
   LogOutIcon,
+  MailIcon,
   PackageIcon,
   PlusIcon,
   RefreshIcon,
   SearchIcon,
   ShieldIcon,
+  SparkleIcon,
   StarIcon,
   TagIcon,
   TrashIcon,
@@ -47,7 +55,7 @@ import {
 import { formatINR, formatShortINR } from "@/lib/format";
 import { uploadProductImage } from "@/services/uploadService";
 
-type Section = "overview" | "orders" | "products" | "homepage" | "recipes" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
+type Section = "overview" | "orders" | "products" | "homepage" | "recipes" | "blog" | "messages" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
 type OrderFilter = "all" | "placed" | "processing" | "shipped";
 type PaginationProps = {
   page: number;
@@ -108,9 +116,11 @@ const NAV: { id: Section; label: string; Icon: typeof HomeIcon }[] = [
   { id: "products", label: "Products", Icon: PackageIcon },
   { id: "homepage", label: "Home page", Icon: HomeIcon },
   { id: "recipes", label: "Recipes", Icon: UtensilsIcon },
+  { id: "blog", label: "Blog", Icon: SparkleIcon },
+  { id: "messages", label: "Messages", Icon: MailIcon },
   { id: "categories", label: "Categories", Icon: TagIcon },
-  { id: "campaigns", label: "Combos & offers", Icon: FlameIcon },
-  { id: "coupons", label: "Promotions", Icon: FlameIcon },
+  { id: "campaigns", label: "Combos", Icon: FlameIcon },
+  { id: "coupons", label: "Offers", Icon: FlameIcon },
   { id: "reviews", label: "Reviews", Icon: StarIcon },
   { id: "analytics", label: "Analytics", Icon: UtensilsIcon },
   { id: "api", label: "API & notifications", Icon: ShieldIcon },
@@ -149,6 +159,7 @@ const primaryButton =
   "inline-flex items-center justify-center gap-2 rounded-xl bg-masala-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-masala-800 disabled:cursor-not-allowed disabled:opacity-50";
 const secondaryButton =
   "inline-flex items-center justify-center gap-2 rounded-xl border border-paper-200 bg-white px-4 py-2.5 text-sm font-semibold text-ink-700 transition hover:border-masala-300 hover:text-masala-800 disabled:opacity-50";
+const statusBadgeClass = "chip inline-flex min-w-24 shrink-0 items-center justify-center whitespace-nowrap";
 
 function displayStatus(value: string) {
   return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
@@ -156,6 +167,16 @@ function displayStatus(value: string) {
 
 function amount(value: number | undefined) {
   return formatINR(value ?? 0);
+}
+
+function formatAdminDateTime(value: string | null | undefined) {
+  if (!value) return "—";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "—";
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(date);
 }
 
 function subscribeAdminSession(onChange: () => void) {
@@ -238,6 +259,54 @@ function Pagination({ page, pageSize, total, onPageChange }: PaginationProps) {
         </button>
       </div>
     </nav>
+  );
+}
+
+function OfferCard({
+  coupon,
+  onEdit,
+  onDelete,
+}: {
+  coupon: AdminCoupon;
+  onEdit: (coupon: AdminCoupon) => void;
+  onDelete: (coupon: AdminCoupon) => void;
+}) {
+  return (
+    <article className="grid h-full gap-4 rounded-xl border border-paper-200 bg-white p-4 shadow-xs sm:p-5">
+      <div className="flex min-w-0 items-start justify-between gap-3">
+        <div className="min-w-0">
+          <span className="inline-flex max-w-full truncate rounded-lg bg-saffron-100 px-2.5 py-1 font-mono text-sm font-bold tracking-wider text-ink-900">
+            {coupon.code}
+          </span>
+          <h3 className="mt-3 break-words font-semibold text-ink-900">{coupon.label}</h3>
+        </div>
+        <span className={`${statusBadgeClass} ${coupon.is_active ? "border-cardamom-200 bg-cardamom-50 text-cardamom-700" : "border-paper-200 bg-paper-50 text-ink-500"}`}>
+          {coupon.is_active ? "Active" : "Paused"}
+        </span>
+      </div>
+
+      <p className="text-sm text-ink-500">
+        {displayStatus(coupon.kind)} · Minimum order {amount(coupon.minimum_order)}
+      </p>
+
+      <dl className="grid grid-cols-2 gap-3 border-y border-paper-100 py-3 text-xs">
+        <div className="min-w-0">
+          <dt className="font-semibold text-ink-400">Starts</dt>
+          <dd className="mt-1 break-words text-ink-700">{coupon.active_from || "No start date"}</dd>
+        </div>
+        <div className="min-w-0">
+          <dt className="font-semibold text-ink-400">Ends</dt>
+          <dd className="mt-1 break-words text-ink-700">{coupon.active_until || "No end date"}</dd>
+        </div>
+      </dl>
+
+      <div className="flex items-center justify-end gap-2 self-end">
+        <button type="button" className={secondaryButton} onClick={() => onEdit(coupon)}>Edit</button>
+        <button type="button" className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50" aria-label={`Delete ${coupon.code}`} onClick={() => onDelete(coupon)}>
+          <TrashIcon className="size-4" />
+        </button>
+      </div>
+    </article>
   );
 }
 
@@ -352,6 +421,11 @@ export default function AdminDashboard() {
   const [ordersPage, setOrdersPage] = useState(1);
   const [productsPage, setProductsPage] = useState(1);
   const [reviewsPage, setReviewsPage] = useState(1);
+  const [categoriesPage, setCategoriesPage] = useState(1);
+  const [campaignCombosPage, setCampaignCombosPage] = useState(1);
+  const [campaignOffersPage, setCampaignOffersPage] = useState(1);
+  const [showAllCampaignCombos, setShowAllCampaignCombos] = useState(false);
+  const [showAllCampaignOffers, setShowAllCampaignOffers] = useState(false);
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [heroImages, setHeroImages] = useState<AdminHeroImage[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
@@ -399,7 +473,6 @@ export default function AdminDashboard() {
   const [couponKind, setCouponKind] = useState<AdminCoupon["kind"]>("percentage");
   const [activeOrder, setActiveOrder] = useState<AdminOrder | null>(null);
   const [originalOrderStatus, setOriginalOrderStatus] = useState("");
-  const [productToAdd, setProductToAdd] = useState("");
   const [comboCatalogProductToAdd, setComboCatalogProductToAdd] = useState("");
 
   const navigateToSection = (nextSection: Section) => {
@@ -693,12 +766,28 @@ export default function AdminDashboard() {
     return matchesFilter && matchesSearch;
   }), [orders, orderFilter, search]);
   const activeProducts = section === "campaigns" ? comboProducts : filteredProducts;
+  const campaignCombos = products
+    .filter((product) => product.is_combo)
+    .sort((left, right) => right.id.localeCompare(left.id));
+  const campaignOffers = [...coupons].sort((left, right) =>
+    (right.id ?? right.code).localeCompare(left.id ?? left.code),
+  );
   const currentOrdersPage = Math.min(ordersPage, Math.max(1, Math.ceil(filteredOrders.length / ADMIN_PAGE_SIZE)));
   const currentProductsPage = Math.min(productsPage, Math.max(1, Math.ceil(activeProducts.length / ADMIN_PAGE_SIZE)));
   const currentReviewsPage = Math.min(reviewsPage, Math.max(1, Math.ceil(reviews.length / ADMIN_PAGE_SIZE)));
+  const currentCategoriesPage = Math.min(categoriesPage, Math.max(1, Math.ceil(categories.length / ADMIN_PAGE_SIZE)));
+  const currentCampaignCombosPage = Math.min(campaignCombosPage, Math.max(1, Math.ceil(campaignCombos.length / ADMIN_PAGE_SIZE)));
+  const currentCampaignOffersPage = Math.min(campaignOffersPage, Math.max(1, Math.ceil(campaignOffers.length / ADMIN_PAGE_SIZE)));
   const visibleOrders = filteredOrders.slice((currentOrdersPage - 1) * ADMIN_PAGE_SIZE, currentOrdersPage * ADMIN_PAGE_SIZE);
   const visibleProducts = activeProducts.slice((currentProductsPage - 1) * ADMIN_PAGE_SIZE, currentProductsPage * ADMIN_PAGE_SIZE);
   const visibleReviews = reviews.slice((currentReviewsPage - 1) * ADMIN_PAGE_SIZE, currentReviewsPage * ADMIN_PAGE_SIZE);
+  const visibleCategories = categories.slice((currentCategoriesPage - 1) * ADMIN_PAGE_SIZE, currentCategoriesPage * ADMIN_PAGE_SIZE);
+  const visibleCampaignCombos = showAllCampaignCombos
+    ? campaignCombos.slice((currentCampaignCombosPage - 1) * ADMIN_PAGE_SIZE, currentCampaignCombosPage * ADMIN_PAGE_SIZE)
+    : campaignCombos.slice(0, 6);
+  const visibleCampaignOffers = showAllCampaignOffers
+    ? campaignOffers.slice((currentCampaignOffersPage - 1) * ADMIN_PAGE_SIZE, currentCampaignOffersPage * ADMIN_PAGE_SIZE)
+    : campaignOffers.slice(0, 6);
 
   if (!token) {
     const firstAdminSetup = registrationStatus !== null && !registrationStatus.admins_exist;
@@ -715,7 +804,7 @@ export default function AdminDashboard() {
           <p className="mt-2 text-sm leading-relaxed text-ink-500">
             {firstAdminSetup
               ? "Create the first administrator account with an email address and password."
-              : "Sign in with an administrator account to manage orders, products and promotions."}
+              : "Sign in with an administrator account to manage orders, products and offers."}
           </p>
           {firstAdminSetup ? (
             <form onSubmit={setupFirstAdmin} className="mt-7 space-y-4">
@@ -961,7 +1050,7 @@ export default function AdminDashboard() {
         method: id ? "PUT" : "POST",
         body: JSON.stringify(body),
       }),
-      id ? "Promotion updated." : "Promotion created.",
+      id ? "Offer updated." : "Offer created.",
     );
     if (saved) setCouponEditor(null);
   };
@@ -1024,10 +1113,10 @@ export default function AdminDashboard() {
   };
 
   const removeCoupon = async (coupon: AdminCoupon) => {
-    if (!window.confirm(`Delete promotion ${coupon.code}?`)) return;
+    if (!window.confirm(`Delete offer ${coupon.code}?`)) return;
     await runAction(
       () => adminRequest(`/api/admin/coupons/${coupon.id ?? coupon.code}`, token, { method: "DELETE" }),
-      "Promotion removed.",
+      "Offer removed.",
     );
   };
 
@@ -1201,13 +1290,11 @@ export default function AdminDashboard() {
           </section>
         ) : null}
 
-        {section === "products" || section === "campaigns" ? (
+        {section === "products" ? (
           <section className="mt-7">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-ink-500">
-                {section === "campaigns"
-                  ? `${comboProducts.length} combos · build discounted bundles from catalog packs. Component stock is deducted when sold.`
-                  : `${products.length} products in catalog · stock and batch details are managed per pack size.`}
+                {products.length} products in catalog · stock and batch details are managed per pack size.
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <label className="relative block">
@@ -1216,9 +1303,9 @@ export default function AdminDashboard() {
                     setSearch(event.target.value);
                     setProductsPage(1);
                     setOrdersPage(1);
-                  }} placeholder={section === "campaigns" ? "Search combos" : "Search products"} aria-label={section === "campaigns" ? "Search combos" : "Search products"} />
+                  }} placeholder="Search products" aria-label="Search products" />
                 </label>
-                <button type="button" onClick={() => openProduct(undefined, section === "campaigns")} className={primaryButton}><PlusIcon className="size-4" />{section === "campaigns" ? "Create combo" : "Add product"}</button>
+                <button type="button" onClick={() => openProduct()} className={primaryButton}><PlusIcon className="size-4" />Add product</button>
               </div>
             </div>
             <ProductsTable products={visibleProducts} onEdit={openProduct} onDelete={async (product) => {
@@ -1227,7 +1314,7 @@ export default function AdminDashboard() {
                 : "This also removes its pack variants.";
               if (!window.confirm(`Delete ${product.name}? ${removalDetails}`)) return;
               const resource = product.is_combo ? "combos" : "products";
-              await runAction(() => adminRequest(`/api/admin/${resource}/${product.id}`, token, { method: "DELETE" }), section === "campaigns" ? "Combo removed." : "Product removed.");
+              await runAction(() => adminRequest(`/api/admin/${resource}/${product.id}`, token, { method: "DELETE" }), "Product removed.");
             }} />
             {activeProducts.length ? (
               <Pagination
@@ -1237,6 +1324,88 @@ export default function AdminDashboard() {
                 onPageChange={setProductsPage}
               />
             ) : null}
+          </section>
+        ) : null}
+
+        {section === "campaigns" ? (
+          <section className="mt-7 space-y-8">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="font-display text-xl font-semibold text-ink-950">Combos</h2>
+                <p className="text-sm text-ink-500">Manage combo listings and their included products.</p>
+              </div>
+              <button type="button" onClick={() => openProduct(undefined, true)} className={primaryButton}>
+                <PlusIcon className="size-4" />Add combo
+              </button>
+            </div>
+
+            <section aria-labelledby="campaign-combos-heading">
+              <div className="mb-4 flex items-center justify-between gap-3">
+                <h3 id="campaign-combos-heading" className="font-display text-lg font-semibold text-ink-950">Combos</h3>
+                <div className="flex items-center gap-3">
+                  <span className="text-sm text-ink-500">{showAllCampaignCombos ? campaignCombos.length : Math.min(6, campaignCombos.length)} of {campaignCombos.length}</span>
+                  {campaignCombos.length > 6 ? (
+                    <button type="button" className="inline-flex items-center gap-1 text-sm font-semibold text-masala-700 hover:text-masala-900" aria-expanded={showAllCampaignCombos} onClick={() => { setShowAllCampaignCombos((showing) => !showing); setCampaignCombosPage(1); }}>
+                      {showAllCampaignCombos ? "Recent 6" : "View all combos"}
+                      <ArrowRightIcon className={`size-4 transition-transform ${showAllCampaignCombos ? "rotate-180" : ""}`} />
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              {campaignCombos.length ? (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {visibleCampaignCombos.map((combo) => (
+                    <article key={combo.id} className="flex h-full flex-col overflow-hidden rounded-xl border border-paper-200 bg-white shadow-xs">
+                      <SmartImage
+                        src={combo.images[0]?.url}
+                        alt={combo.name}
+                        aspect="aspect-[16/9]"
+                        sizes="(max-width: 640px) 100vw, 33vw"
+                        zoom={false}
+                      />
+                      <div className="flex flex-1 flex-col gap-3 p-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <h4 className="break-words font-semibold text-ink-900">{combo.name}</h4>
+                            <p className="mt-1 break-all text-xs text-ink-400">/{combo.slug}</p>
+                          </div>
+                          <span className={`${statusBadgeClass} ${combo.status === "active" ? "border-cardamom-200 bg-cardamom-50 text-cardamom-700" : "border-paper-200 bg-paper-50 text-ink-500"}`}>
+                            {displayStatus(combo.status)}
+                          </span>
+                        </div>
+                        <p className="line-clamp-2 min-h-10 text-sm text-ink-600">{combo.description || "No description added."}</p>
+                        <p className="text-sm font-semibold text-ink-900">
+                          {amount(combo.price)} <span className="font-normal text-ink-400">· MRP {amount(combo.mrp)}</span>
+                        </p>
+                        <div className="mt-auto flex justify-end gap-2 border-t border-paper-100 pt-3">
+                          <button type="button" className={secondaryButton} onClick={() => openProduct(combo)}>Edit</button>
+                          <button
+                            type="button"
+                            className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50"
+                            aria-label={`Delete ${combo.name}`}
+                            onClick={() => {
+                              if (!window.confirm(`Delete ${combo.name}? This also removes its included-product links.`)) return;
+                              void runAction(() => adminRequest(`/api/admin/combos/${combo.id}`, token, { method: "DELETE" }), "Combo removed.");
+                            }}
+                          ><TrashIcon className="size-4" /></button>
+                        </div>
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              ) : <EmptyPanel>No combos created yet</EmptyPanel>}
+              {showAllCampaignCombos && campaignCombos.length > 6 ? (
+                <ListPagination
+                  page={currentCampaignCombosPage}
+                  pageSize={ADMIN_PAGE_SIZE}
+                  total={campaignCombos.length}
+                  itemLabel="combos"
+                  ariaLabel="Combos pagination"
+                  onPageChange={setCampaignCombosPage}
+                />
+              ) : null}
+            </section>
+
           </section>
         ) : null}
 
@@ -1251,6 +1420,8 @@ export default function AdminDashboard() {
         ) : null}
 
         {section === "recipes" ? <RecipesManagement token={token} /> : null}
+        {section === "blog" ? <BlogManagement token={token} /> : null}
+        {section === "messages" ? <MessagesManagement token={token} /> : null}
 
         {section === "categories" ? (
           <section className="mt-7">
@@ -1260,7 +1431,7 @@ export default function AdminDashboard() {
             </div>
             {categories.length ? (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {categories.map((category) => (
+                {visibleCategories.map((category) => (
                   <article key={category.id} className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
                     <div className="flex items-start justify-between gap-3">
                       <div>
@@ -1278,38 +1449,57 @@ export default function AdminDashboard() {
                 ))}
               </div>
             ) : <EmptyPanel>No categories loaded</EmptyPanel>}
+            {categories.length > 0 ? (
+              <ListPagination
+                page={currentCategoriesPage}
+                pageSize={ADMIN_PAGE_SIZE}
+                total={categories.length}
+                itemLabel="categories"
+                ariaLabel="Categories pagination"
+                onPageChange={setCategoriesPage}
+              />
+            ) : null}
           </section>
         ) : null}
 
-        {section === "coupons" || section === "campaigns" ? (
+        {section === "coupons" ? (
           <section className="mt-7">
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-sm text-ink-500">
-                {section === "campaigns" ? "Create and manage coupon offers shown on the storefront." : "Manage coupon rules and combo offers shown at checkout."}
+                Manage coupon rules and offers shown at checkout.
               </p>
-              <button type="button" className={primaryButton} onClick={() => openCouponEditor("new")}><PlusIcon className="size-4" />{section === "campaigns" ? "Create offer" : "Create promotion"}</button>
+              <div className="flex items-center gap-2">
+                {campaignOffers.length > 6 ? (
+                  <button type="button" className={secondaryButton} aria-expanded={showAllCampaignOffers} onClick={() => { setShowAllCampaignOffers((showing) => !showing); setCampaignOffersPage(1); }}>
+                    {showAllCampaignOffers ? "Recent 6" : "View all offers"}
+                    <ArrowRightIcon className={`size-4 transition-transform ${showAllCampaignOffers ? "rotate-180" : ""}`} />
+                  </button>
+                ) : null}
+                <button type="button" className={primaryButton} onClick={() => openCouponEditor("new")}><PlusIcon className="size-4" />Add offer</button>
+              </div>
             </div>
             {coupons.length ? (
-              <div className="grid gap-3 lg:grid-cols-2">
-                {coupons.map((coupon) => (
-                  <article key={coupon.id ?? coupon.code} className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <span className="inline-flex rounded-lg bg-saffron-100 px-2.5 py-1 font-mono text-sm font-bold tracking-wider text-ink-900">{coupon.code}</span>
-                        <p className="mt-3 font-semibold text-ink-900">{coupon.label}</p>
-                        <p className="mt-1 text-xs text-ink-500">{displayStatus(coupon.kind)} · Minimum order {amount(coupon.minimum_order)}</p>
-                      </div>
-                      <span className={`chip ${coupon.is_active ? "border-cardamom-200 bg-cardamom-50 text-cardamom-700" : ""}`}>{coupon.is_active ? "Active" : "Paused"}</span>
-                    </div>
-                    {(coupon.active_from || coupon.active_until) ? <p className="mt-3 text-xs text-ink-400">{coupon.active_from || "Any date"} — {coupon.active_until || "No expiry"}</p> : null}
-                    <div className="mt-4 flex gap-2">
-                      <button type="button" className={secondaryButton} onClick={() => openCouponEditor(coupon)}>Edit</button>
-                      <button type="button" className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50" aria-label={`Delete ${coupon.code}`} onClick={() => void removeCoupon(coupon)}><TrashIcon className="size-4" /></button>
-                    </div>
-                  </article>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {visibleCampaignOffers.map((coupon) => (
+                  <OfferCard
+                    key={coupon.id ?? coupon.code}
+                    coupon={coupon}
+                    onEdit={(offer) => openCouponEditor(offer)}
+                    onDelete={(offer) => void removeCoupon(offer)}
+                  />
                 ))}
               </div>
-            ) : <EmptyPanel>No promotions loaded</EmptyPanel>}
+            ) : <EmptyPanel>No offers loaded</EmptyPanel>}
+            {showAllCampaignOffers && campaignOffers.length > 6 ? (
+              <ListPagination
+                page={currentCampaignOffersPage}
+                pageSize={ADMIN_PAGE_SIZE}
+                total={coupons.length}
+                itemLabel="offers"
+                ariaLabel="Offers pagination"
+                onPageChange={setCampaignOffersPage}
+              />
+            ) : null}
           </section>
         ) : null}
 
@@ -1325,9 +1515,12 @@ export default function AdminDashboard() {
                         <div className="flex flex-wrap items-center gap-2">
                           <h2 className="font-semibold text-ink-950">{review.reviewer_name}</h2>
                           <span className="text-saffron-600" aria-label={`${review.rating} out of 5 stars`}>{"★".repeat(Math.max(0, Math.min(review.rating, 5)))}</span>
-                          <span className="chip">{displayStatus(review.status)}</span>
+                          <span className={statusBadgeClass}>{displayStatus(review.status)}</span>
                         </div>
-                        <p className="mt-1 text-xs text-ink-400">{review.product_name ?? `${review.combo_id ? "Combo" : "Product"} #${review.combo_id ?? review.product_id ?? "unknown"}`}{review.created_at ? ` · ${new Date(review.created_at).toLocaleDateString()}` : ""}</p>
+                        <p className="mt-1 text-xs text-ink-400">
+                          {review.product_name ?? `${review.combo_id ? "Combo" : "Product"} #${review.combo_id ?? review.product_id ?? "unknown"}`}
+                          {review.created_at ? <> · <time dateTime={review.created_at}>{formatAdminDateTime(review.created_at)}</time></> : ""}
+                        </p>
                         <p className="mt-3 text-sm leading-relaxed text-ink-700">{review.comment}</p>
                       </div>
                       {review.status === "pending" ? (
@@ -1546,7 +1739,7 @@ export default function AdminDashboard() {
       {productEditor ? (
         <Modal title={productEditor.is_combo ? (productEditor.id ? "Edit combo" : "Create combo") : (productEditor.id ? "Edit product" : "Add product")} onClose={() => setProductEditor(null)} wide>
           <form onSubmit={saveProduct} className="space-y-5">
-            <div className="grid gap-4 sm:grid-cols-2">
+            <div className="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2">
               <label className={labelClass}>{productEditor.is_combo ? "Combo name" : "Product name"}<input required className={fieldClass} value={productEditor.name} onChange={(event) => setProductEditor({ ...productEditor, name: event.target.value })} /></label>
               <label className={labelClass}>URL slug<input required className={fieldClass} value={productEditor.slug} onChange={(event) => setProductEditor({ ...productEditor, slug: event.target.value })} /></label>
               {productEditor.is_combo ? (
@@ -1560,10 +1753,10 @@ export default function AdminDashboard() {
                   <label className={labelClass}>MRP (₹)<input required type="number" min="0" step="0.01" className={fieldClass} value={productEditor.mrp} onChange={(event) => setProductEditor({ ...productEditor, mrp: event.target.value })} /></label>
                   <label className={labelClass}>Categories<input className={fieldClass} placeholder="Whole Spices, Breakfast Masalas" value={productEditor.categories} onChange={(event) => setProductEditor({ ...productEditor, categories: event.target.value })} /></label>
                   <label className={labelClass}>Dish type<input className={fieldClass} placeholder="Sambar, biryani…" value={productEditor.dish_type} onChange={(event) => setProductEditor({ ...productEditor, dish_type: event.target.value })} /></label>
-                  <label className={labelClass}>Spice level<select className={fieldClass} value={productEditor.spice_level} onChange={(event) => setProductEditor({ ...productEditor, spice_level: event.target.value })}><option value="mild">Mild</option><option value="medium">Medium</option><option value="hot">Hot</option></select></label>
+                  <label className={labelClass}>Spice level<SelectField value={productEditor.spice_level} onChange={(event) => setProductEditor({ ...productEditor, spice_level: event.target.value })}><option value="mild">Mild</option><option value="medium">Medium</option><option value="hot">Hot</option></SelectField></label>
                 </>
               )}
-              <label className={labelClass}>Status<select className={fieldClass} value={productEditor.status} onChange={(event) => setProductEditor({ ...productEditor, status: event.target.value })}><option value="active">Active</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
+                  <label className={labelClass}>Status<SelectField value={productEditor.status} onChange={(event) => setProductEditor({ ...productEditor, status: event.target.value })}><option value="active">Active</option><option value="draft">Draft</option><option value="archived">Archived</option></SelectField></label>
               {productEditor.is_combo ? (
                 <section className="sm:col-span-2 rounded-2xl border border-paper-200 bg-paper-50 p-4">
                   <div className="mb-3">
@@ -1574,9 +1767,9 @@ export default function AdminDashboard() {
                     <div className="rounded-xl bg-white p-3">
                       <div className="flex flex-col gap-2 sm:flex-row">
                         <label className="sr-only" htmlFor="combo-catalog-product">Add a regular product pack</label>
-                        <select
+                        <SelectField
                           id="combo-catalog-product"
-                          className={`${fieldClass} mt-0`}
+                          wrapperClassName="mt-0 min-w-0 flex-1"
                           value={comboCatalogProductToAdd}
                           onChange={(event) => setComboCatalogProductToAdd(event.target.value)}
                         >
@@ -1586,7 +1779,7 @@ export default function AdminDashboard() {
                               {product.name} · {variant.pack_size}
                             </option>
                           )))}
-                        </select>
+                        </SelectField>
                         <button
                           type="button"
                           className={secondaryButton}
@@ -1697,7 +1890,7 @@ export default function AdminDashboard() {
           <form onSubmit={saveCategory} className="space-y-4">
             <label className={labelClass}>Name<input name="name" required defaultValue={categoryEditor === "new" ? "" : categoryEditor.name} className={fieldClass} /></label>
             <label className={labelClass}>Slug<input name="slug" required defaultValue={categoryEditor === "new" ? "" : categoryEditor.slug} className={fieldClass} /></label>
-            <label className={labelClass}>Category type<select name="type" defaultValue={categoryEditor === "new" ? "product_type" : categoryEditor.type} className={fieldClass}><option value="product_type">Product type</option><option value="region">Region</option><option value="dish">Dish</option><option value="collection">Collection</option></select></label>
+            <label className={labelClass}>Category type<SelectField name="type" defaultValue={categoryEditor === "new" ? "product_type" : categoryEditor.type}><option value="product_type">Product type</option><option value="region">Region</option><option value="dish">Dish</option><option value="collection">Collection</option></SelectField></label>
             <label className={labelClass}>Description<textarea name="description" rows={3} defaultValue={categoryEditor === "new" ? "" : categoryEditor.description ?? ""} className={fieldClass} /></label>
             <div className="flex justify-end gap-2"><button type="button" className={secondaryButton} onClick={() => setCategoryEditor(null)}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save category</button></div>
           </form>
@@ -1705,7 +1898,7 @@ export default function AdminDashboard() {
       ) : null}
 
       {couponEditor ? (
-        <Modal title={couponEditor === "new" ? "Create promotion" : "Edit promotion"} onClose={() => setCouponEditor(null)}>
+        <Modal title={couponEditor === "new" ? "Create offer" : "Edit offer"} onClose={() => setCouponEditor(null)} wide>
           <form onSubmit={saveCoupon} className="space-y-4">
             {(() => {
               const draft = couponEditor === "new" ? newCoupon() : {
@@ -1725,10 +1918,11 @@ export default function AdminDashboard() {
               };
               return (
                 <>
-                  <label className={labelClass}>Code<input name="code" required defaultValue={draft.code} className={fieldClass} /></label>
-                  <label className={labelClass}>Offer title (optional)<input name="label" defaultValue={draft.label} className={fieldClass} placeholder="e.g. 10% off your order" /></label>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className={labelClass}>Offer type<select name="kind" value={couponKind} onChange={(event) => setCouponKind(event.target.value as AdminCoupon["kind"])} className={fieldClass}><option value="percentage">Percentage off</option><option value="fixed">Amount off</option><option value="buy_x_get_y">Buy X, get Y free</option></select></label>
+                  <div className="grid items-start gap-x-4 gap-y-4 sm:grid-cols-2">
+                    <label className={labelClass}>Offer code<input name="code" required defaultValue={draft.code} className={fieldClass} /></label>
+                    <label className={labelClass}>Offer title<input name="label" defaultValue={draft.label} className={fieldClass} placeholder="Optional display title" /></label>
+                    <label className={labelClass}>Offer type<SelectField name="kind" value={couponKind} onChange={(event) => setCouponKind(event.target.value as AdminCoupon["kind"])}><option value="percentage">Percentage off</option><option value="fixed">Amount off</option><option value="buy_x_get_y">Buy X, get Y free</option></SelectField></label>
+                    <label className={labelClass}>Minimum order (₹)<input name="minimum_order" min="0" type="number" step="0.01" defaultValue={draft.minimum_order} className={fieldClass} /></label>
                     {couponKind === "buy_x_get_y" ? (
                       <>
                         <label className={labelClass}>Buy quantity<input name="buy_quantity" required min="1" type="number" step="1" defaultValue={draft.buy_quantity} className={fieldClass} /></label>
@@ -1738,19 +1932,20 @@ export default function AdminDashboard() {
                     ) : (
                       <label className={labelClass}>{couponKind === "percentage" ? "Discount (%)" : "Discount (₹)"}<input name="discount" required min="0.01" max={couponKind === "percentage" ? "100" : undefined} type="number" step="0.01" defaultValue={draft.discount} className={fieldClass} /></label>
                     )}
-                    <label className={labelClass}>Minimum order (₹)<input name="minimum_order" min="0" type="number" step="0.01" defaultValue={draft.minimum_order} className={fieldClass} /></label>
-                    <label className="flex items-center gap-2 text-sm font-medium text-ink-700"><input name="is_active" type="checkbox" defaultChecked={draft.is_active} className="size-4 accent-masala-700" /> Offer is active</label>
+                    <label className="flex min-h-16 items-center gap-3 self-end rounded-xl border border-paper-200 bg-white px-4 py-3 text-sm font-semibold text-ink-700">
+                      <input name="is_active" type="checkbox" defaultChecked={draft.is_active} className="size-4 shrink-0 accent-masala-700" /> Offer is active
+                    </label>
                   </div>
-                  <details className="rounded-xl border border-paper-200 px-4 py-3">
-                    <summary className="cursor-pointer text-sm font-semibold text-ink-700">Optional settings</summary>
-                    <div className="mt-4 grid gap-3 sm:grid-cols-2">
-                      <label className={labelClass}>Maximum discount (₹)<input name="max_discount" min="0" type="number" step="0.01" defaultValue={draft.max_discount} className={fieldClass} /></label>
-                      <label className="flex items-center gap-2 text-sm font-medium text-ink-700"><input name="first_order_only" type="checkbox" defaultChecked={draft.first_order_only} className="size-4 accent-masala-700" /> First order only</label>
+                  <section className="rounded-xl border border-paper-200 bg-white p-4">
+                    <h3 className="text-sm font-semibold text-ink-800">Schedule and eligibility</h3>
+                    <div className="mt-3 grid items-start gap-4 sm:grid-cols-2">
                       <label className={labelClass}>Starts<input name="active_from" type="date" defaultValue={draft.active_from} className={fieldClass} /></label>
                       <label className={labelClass}>Ends<input name="active_until" type="date" defaultValue={draft.active_until} className={fieldClass} /></label>
+                      <label className={labelClass}>Maximum discount (₹)<input name="max_discount" min="0" type="number" step="0.01" defaultValue={draft.max_discount} className={fieldClass} /></label>
+                      <label className="flex min-h-16 items-center gap-3 self-end rounded-xl border border-paper-200 bg-paper-50 px-4 py-3 text-sm font-semibold text-ink-700"><input name="first_order_only" type="checkbox" defaultChecked={draft.first_order_only} className="size-4 shrink-0 accent-masala-700" /> First order only</label>
                     </div>
-                  </details>
-                  <div className="flex justify-end gap-2 border-t border-paper-200 pt-4"><button type="button" className={secondaryButton} onClick={() => setCouponEditor(null)}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save promotion</button></div>
+                  </section>
+                  <div className="flex justify-end gap-2 border-t border-paper-200 pt-4"><button type="button" className={secondaryButton} onClick={() => setCouponEditor(null)}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save offer</button></div>
                 </>
               );
             })()}
@@ -1766,37 +1961,11 @@ export default function AdminDashboard() {
                 <h3 className="font-semibold text-ink-900">{activeOrder.customer_name}</h3>
                 <p className="mt-1 text-sm text-ink-600">{activeOrder.phone}{activeOrder.email ? ` · ${activeOrder.email}` : ""}</p>
                 <p className="mt-2 text-sm text-ink-600">{[activeOrder.address_line, activeOrder.city, activeOrder.state, activeOrder.postal_code].filter(Boolean).join(", ")}</p>
-                <p className="mt-2 text-xs text-ink-500">Placed {new Date(activeOrder.created_at).toLocaleString()} · Payment {displayStatus(activeOrder.payment_status ?? "pending_offline")}</p>
+                <p className="mt-2 text-xs text-ink-500">Placed <time dateTime={activeOrder.created_at}>{formatAdminDateTime(activeOrder.created_at)}</time> · Payment {displayStatus(activeOrder.payment_status ?? "pending_offline")}</p>
               </div>
               <div className="mt-4">
                 <h3 className="font-semibold text-ink-900">Line items · {amount(activeOrder.total)}</h3>
                 <div className="mt-2 space-y-2">
-                    {products.length > 0 ? (
-                      <div className="mb-3 flex flex-col gap-2 sm:flex-row">
-                        <label className="sr-only" htmlFor="order-add-product">Add a product to this order</label>
-                        <select id="order-add-product" className={`${fieldClass} mt-0`} value={productToAdd} onChange={(event) => setProductToAdd(event.target.value)}>
-                          <option value="">Add a product…</option>
-                          {products.filter((product) => product.status === "active").map((product) => <option key={product.id} value={product.id}>{product.name}</option>)}
-                        </select>
-                        <button type="button" className={secondaryButton} disabled={!productToAdd} onClick={() => {
-                          const product = products.find((candidate) => candidate.id === productToAdd);
-                          if (!product) return;
-                          const variant = product.variants[0];
-                          setActiveOrder({
-                            ...activeOrder,
-                            items: [...activeOrder.items, {
-                              product_id: product.id,
-                              variant_id: variant?.id ?? null,
-                              name: product.name,
-                              pack_size: variant?.pack_size ?? "Standard",
-                              price: variant?.price ?? product.price,
-                              qty: 1,
-                            }],
-                          });
-                          setProductToAdd("");
-                        }}><PlusIcon className="size-4" />Add item</button>
-                      </div>
-                    ) : null}
                     {activeOrder.items.map((item, index) => (
                       <div key={`${item.product_id}-${item.variant_id ?? index}`} className="grid grid-cols-[1fr_5rem_auto] items-center gap-3 rounded-xl border border-paper-200 px-3 py-2.5">
                         <span className="min-w-0"><span className="block truncate text-sm font-medium text-ink-800">{item.name}</span><span className="text-xs text-ink-400">{item.pack_size ?? "Standard"} · {amount(item.price)}</span></span>
@@ -1808,7 +1977,7 @@ export default function AdminDashboard() {
               </div>
             </div>
             <div className="space-y-4">
-              <label className={labelClass}>Order status<select className={fieldClass} value={activeOrder.status} onChange={(event) => setActiveOrder({ ...activeOrder, status: event.target.value as AdminOrder["status"] })}>{[activeOrder.status, NEXT_ORDER_STAGE[activeOrder.status]].filter((status): status is AdminOrder["status"] => Boolean(status)).map((status) => <option key={status} value={status}>{displayStatus(status)}</option>)}</select></label>
+              <label className={labelClass}>Order status<SelectField value={activeOrder.status} onChange={(event) => setActiveOrder({ ...activeOrder, status: event.target.value as AdminOrder["status"] })}>{[activeOrder.status, NEXT_ORDER_STAGE[activeOrder.status]].filter((status): status is AdminOrder["status"] => Boolean(status)).map((status) => <option key={status} value={status}>{displayStatus(status)}</option>)}</SelectField></label>
               {activeOrder.status === "shipped" ? (
                 <>
                   <label className={labelClass}>
@@ -1855,9 +2024,9 @@ export default function AdminDashboard() {
               <div key={account.id} className="flex items-center justify-between gap-3 px-4 py-3">
                 <span>
                   <span className="block text-sm font-semibold text-ink-900">{account.email}</span>
-                  <span className="text-xs text-ink-400">Added {new Date(account.created_at).toLocaleDateString()}</span>
+                  <span className="text-xs text-ink-400">Added <time dateTime={account.created_at}>{formatAdminDateTime(account.created_at)}</time></span>
                 </span>
-                <span className={`chip ${account.is_active ? "border-cardamom-200 bg-cardamom-50 text-cardamom-700" : "border-chili-100 bg-chili-50 text-chili-700"}`}>
+                <span className={`${statusBadgeClass} ${account.is_active ? "border-cardamom-200 bg-cardamom-50 text-cardamom-700" : "border-chili-100 bg-chili-50 text-chili-700"}`}>
                   {account.is_active ? "Active" : "Inactive"}
                 </span>
               </div>
@@ -1969,7 +2138,7 @@ function OrdersTable({ orders, onSelect }: { orders: AdminOrder[]; onSelect: (or
   return (
     <div className="overflow-hidden rounded-2xl border border-paper-200 bg-white shadow-xs">
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[740px] text-left text-sm">
+        <table className="w-full min-w-[900px] text-left text-sm">
           <thead className="bg-paper-100 text-[0.68rem] font-bold tracking-wider text-ink-500 uppercase">
             <tr><th className="px-4 py-3">Order</th><th className="px-4 py-3">Customer</th><th className="px-4 py-3">Items</th><th className="px-4 py-3">Total</th><th className="px-4 py-3">Status</th><th className="px-4 py-3">Placed</th><th className="px-4 py-3"><span className="sr-only">Review</span></th></tr>
           </thead>
@@ -1980,8 +2149,8 @@ function OrdersTable({ orders, onSelect }: { orders: AdminOrder[]; onSelect: (or
                 <td className="px-4 py-3.5"><span className="block font-medium">{order.customer_name}</span><span className="text-xs text-ink-400">{order.phone}</span></td>
                 <td className="px-4 py-3.5 text-ink-600">{order.item_count}</td>
                 <td className="px-4 py-3.5 font-semibold">{amount(order.total)}</td>
-                <td className="px-4 py-3.5"><span className="chip">{displayStatus(order.status)}</span></td>
-                <td className="px-4 py-3.5 text-ink-500">{new Date(order.created_at).toLocaleDateString()}</td>
+                <td className="px-4 py-3.5"><span className={statusBadgeClass}>{displayStatus(order.status)}</span></td>
+                <td className="px-4 py-3.5 whitespace-nowrap text-ink-500"><time dateTime={order.created_at}>{formatAdminDateTime(order.created_at)}</time></td>
                 <td className="px-4 py-3.5"><button type="button" className="text-sm font-semibold text-masala-700 hover:underline" onClick={() => onSelect(order)}>Review</button></td>
               </tr>
             ))}
@@ -2017,7 +2186,7 @@ function ProductsTable({
                   <td className="px-4 py-3.5 text-ink-600">{product.variants.length}</td>
                   <td className={`px-4 py-3.5 font-semibold ${stock <= 5 ? "text-chili-700" : "text-ink-700"}`}>{stock} units</td>
                   <td className="px-4 py-3.5 font-semibold">{amount(product.price)}</td>
-                  <td className="px-4 py-3.5"><span className="chip">{displayStatus(product.status)}</span></td>
+                  <td className="px-4 py-3.5"><span className={statusBadgeClass}>{displayStatus(product.status)}</span></td>
                   <td className="px-4 py-3.5"><div className="flex items-center gap-2"><button type="button" className="text-sm font-semibold text-masala-700 hover:underline" onClick={() => onEdit(product)}>Edit</button><button type="button" className="rounded-lg p-1.5 text-chili-600 hover:bg-chili-50" aria-label={`Delete ${product.name}`} onClick={() => onDelete(product)}><TrashIcon className="size-4" /></button></div></td>
                 </tr>
               );

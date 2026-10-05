@@ -51,14 +51,14 @@ const PACK_IDEAS = [
     title: "Everyday masala set",
     body: "Weeknight gravies, rice dishes and finishing spices, chosen together so the shelf stays complete through the month.",
     cta: "Browse everyday blends",
-    href: "/collections/everyday-blends",
+    href: "/collections/spice-blends",
   },
   {
     icon: LeafIcon,
     title: "Whole spice box",
     body: "Whole spices to toast and grind at home, for cooks who like to start every dish from scratch.",
     cta: "Browse whole spices",
-    href: "/collections/whole-spices",
+    href: "/pages/contact",
   },
   {
     icon: PackageIcon,

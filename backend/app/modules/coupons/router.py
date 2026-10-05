@@ -64,8 +64,10 @@ async def validate_coupon(
             select(coupons_table).where(coupons_table.c.code == payload.code.strip().upper())
         )
         managed = managed_result.mappings().first()
-        prior_result = await db.execute(select(orders_table.c.id))
-        previous_orders = [row[0] for row in prior_result]
+        prior_result = await db.execute(
+            select(orders_table.c.phone, orders_table.c.email)
+        )
+        previous_orders = [dict(row) for row in prior_result.mappings()]
         if managed is not None:
             quote = calculate_managed_coupon(
                 dict(managed),
@@ -122,11 +124,13 @@ async def validate_coupon_legacy(
         managed = managed_result.mappings().first()
         if managed is None:
             raise CouponValidationError("That promo code is not recognised.")
-        prior_result = await db.execute(select(orders_table.c.id))
+        prior_result = await db.execute(
+            select(orders_table.c.phone, orders_table.c.email)
+        )
         quote = calculate_managed_coupon(
             dict(managed),
             [_LegacyItem(Decimal(str(max(0, subtotal))))],
-            existing_orders=[row[0] for row in prior_result],
+            existing_orders=[dict(row) for row in prior_result.mappings()],
             phone=phone,
             email=email,
             enforce_customer_identity=bool(phone or email),

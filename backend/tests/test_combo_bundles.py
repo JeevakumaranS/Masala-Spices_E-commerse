@@ -16,11 +16,24 @@ from app.core.database import (
     products_table,
     variants_table,
 )
-from app.modules.admin.router import ProductInput
+from app.modules.admin.router import OrderLineAdjustment, ProductInput, _rebuild_order_items
 from app.modules.orders.catalog import CatalogValidationError, quote_order_items
 from app.modules.orders.catalog import QuotedOrderItem
 from app.modules.orders.router import _deduct_order_inventory
 from app.modules.orders.schemas import OrderItemInput
+
+
+def test_admin_order_rebuild_rejects_new_products() -> None:
+    product_id = uuid4()
+
+    with pytest.raises(HTTPException, match="cannot be added to existing orders") as error:
+        asyncio.run(_rebuild_order_items(
+            object(),
+            {"items": []},
+            [OrderLineAdjustment(product_id=product_id, variant_id=None, qty=1)],
+        ))
+
+    assert error.value.status_code == 422
 
 
 def _combo_payload(

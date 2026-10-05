@@ -74,6 +74,11 @@ def test_homepage_image_import_rejects_untrusted_sources(image_url: str) -> None
     [
         "https://images.unsplash.com/photo-123.jpg",
         "https://imgs.search.brave.com/photo.jpg",
+        "https://shop.cookdtv.com/cdn/shop/files/cat-kulambu.png",
+        "https://img.magnific.com/free-psd/spices.jpg",
+        "https://tiimg.tistatic.com/fp/1/007/630/turmeric.jpg",
+        "https://images.jdmagicbox.com/quickquotes/images_main/pickles.png",
+        "https://assets.cookdtv.com/t/640/recipe-image",
     ],
 )
 def test_homepage_image_import_allows_known_image_sources(image_url: str) -> None:

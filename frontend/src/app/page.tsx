@@ -3,9 +3,10 @@ import Link from "next/link";
 import { Reveal } from "@/components/ui/Reveal";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { HeroImageCarousel } from "@/components/HeroImageCarousel";
+import { ProductCard } from "@/components/ProductCard";
 import { ProductRail } from "@/components/ProductRail";
 import { SmartImage } from "@/components/ui/SmartImage";
-import { getCategories, getHeroImages, getHomepageContent, getProducts, getRecipes } from "@/lib/api";
+import { getAllCombos, getCategories, getHeroImages, getHomepageContent, getProducts, getRecipes } from "@/lib/api";
 import {
   ArrowRightIcon,
 } from "@/components/ui/icons";
@@ -18,6 +19,37 @@ export const metadata: Metadata = {
 
 const TIGHTER_CATEGORY_CROPS = new Set(["masala-powders", "pure-spices", "pickles"]);
 
+type HomepageCategory = {
+  slug: string;
+  name: string;
+  imageUrl?: string;
+  href: string;
+};
+
+function CategoryLink({ category }: { category: HomepageCategory }) {
+  const tighterCrop = TIGHTER_CATEGORY_CROPS.has(category.slug);
+
+  return (
+    <Link
+      href={category.href}
+      className="group flex w-36 shrink-0 flex-col items-center"
+    >
+      <SmartImage
+        src={category.imageUrl}
+        alt={category.name}
+        aspect="aspect-square"
+        sizes="(max-width: 640px) 28vw, (max-width: 1024px) 18vw, 10vw"
+        wrapperClassName="size-32 shrink-0 rounded-full"
+        className={tighterCrop ? "scale-125" : undefined}
+        zoom={false}
+      />
+      <span className="mt-3 flex min-h-8 w-full items-start justify-center text-center font-display text-[0.82rem] leading-tight font-semibold text-ink-950 transition-colors duration-200 group-hover:text-masala-800 group-focus-visible:text-masala-800 sm:text-sm">
+        {category.name}
+      </span>
+    </Link>
+  );
+}
+
 export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
@@ -25,7 +57,7 @@ export default async function HomePage() {
     getCategories(),
     getProducts(),
     getRecipes(),
-    getProducts("combos-packs"),
+    getAllCombos(),
     getHeroImages(),
     getHomepageContent(),
   ]);
@@ -34,10 +66,10 @@ export default async function HomePage() {
   const bestsellers = configuredBestsellers.length
     ? configuredBestsellers.flatMap((slug) => products.filter((product) => product.slug === slug))
     : [];
-  const configuredCombos = homepageContent.combos.product_slugs;
-  const featuredCombos = configuredCombos.length
-    ? configuredCombos.flatMap((slug) => comboProducts.filter((product) => product.is_combo && product.slug === slug)).slice(0, 12)
-    : [];
+  const configuredCombos = [...new Set(homepageContent.combos.product_slugs)].slice(0, 4);
+  const featuredCombos = configuredCombos.flatMap((slug) =>
+    comboProducts.filter((product) => product.is_combo && product.slug === slug),
+  );
   const featuredCategories = homepageContent.categories.items.flatMap((entry) => {
     const category = categories.find((item) => item.slug === entry.slug);
     const imageProduct =
@@ -51,11 +83,10 @@ export default async function HomePage() {
       href: category ? `/collections/${category.slug}` : "/search",
     }];
   });
-  const configuredRecipes = homepageContent.recipes.recipe_slugs;
-  const featuredRecipes = (configuredRecipes.length
-    ? configuredRecipes.flatMap((slug) => recipes.filter((recipe) => recipe.slug === slug))
-    : []
-  ).slice(0, 12);
+  const configuredRecipes = [...new Set(homepageContent.recipes.recipe_slugs)].slice(0, 4);
+  const featuredRecipes = configuredRecipes.flatMap((slug) =>
+    recipes.filter((recipe) => recipe.slug === slug),
+  );
   return (
     <>
       {/* ============================ HERO ============================ */}
@@ -106,30 +137,9 @@ export default async function HomePage() {
         ) : (
           <Reveal delay={120}>
             <div className="no-scrollbar mt-6 flex items-start gap-6 overflow-x-auto px-1 pb-2 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 lg:gap-7">
-              {featuredCategories.map((category) => {
-                const tighterCrop = TIGHTER_CATEGORY_CROPS.has(category.slug);
-                return (
-                  <Link
-                    key={category.slug}
-                    href={category.href}
-                    className="group flex w-36 shrink-0 flex-col items-center"
-                  >
-                    <SmartImage
-                      src={category.imageUrl}
-                      alt={category.name}
-                      aspect="aspect-square"
-                      sizes="(max-width: 640px) 28vw, (max-width: 1024px) 18vw, 10vw"
-                      wrapperClassName="size-32 shrink-0 rounded-full"
-                      className={tighterCrop ? "scale-125" : undefined}
-                      zoom={false}
-                    />
-                    <span className="mt-3 flex min-h-8 w-full items-start justify-center whitespace-nowrap text-center font-display text-[0.82rem] leading-tight font-semibold text-ink-950 transition-colors duration-200 group-hover:text-masala-800 group-focus-visible:text-masala-800 sm:text-sm">
-                      {category.name}
-                    </span>
-                  </Link>
-                );
-              })}
-
+              {featuredCategories.map((category) => (
+                <CategoryLink key={category.slug} category={category} />
+              ))}
               <Link
                 href="/search"
                 aria-label="View all collections"
@@ -154,21 +164,32 @@ export default async function HomePage() {
           products={bestsellers}
           title={homepageContent.bestsellers.title}
           navigationHref="/search"
-          navigationButtonClassName="size-11 border-paper-300"
         />
       ) : null}
 
       {/* ============================ COMBOS ============================ */}
       {featuredCombos.length > 0 ? (
-        <section className="bg-paper-50 pt-4 pb-8 md:pt-6 md:pb-10">
-          <ProductRail
-            products={featuredCombos}
-            title={homepageContent.combos.title}
-            description={homepageContent.combos.description}
-            navigationHref="/collections/combos-packs"
-            sectionClassName="bg-paper-50 py-0"
-            navigationButtonClassName="size-11 border-paper-300"
-          />
+        <section className="bg-paper-50 py-7 md:py-9">
+          <div className="shell">
+            <div className="flex flex-col items-center gap-2 sm:relative sm:block">
+              <div className="text-center sm:mx-auto sm:max-w-[calc(100%-11rem)]">
+                <h2 className="section-title text-[1.375rem] text-center md:text-[1.625rem]">Better Valued Combos</h2>
+                {homepageContent.combos.description ? <p className="mt-1.5 text-center text-xs text-ink-500 sm:text-sm">{homepageContent.combos.description}</p> : null}
+              </div>
+              <Link
+                href="/offers"
+                className="group inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-masala-700 transition hover:text-masala-900 sm:absolute sm:right-0 sm:bottom-0"
+              >
+                View all offers
+                <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-1" />
+              </Link>
+            </div>
+            <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+              {featuredCombos.map((combo, index) => (
+                <ProductCard key={combo.id} product={combo} priority={index < 2} density="compact" className="h-full min-w-0" />
+              ))}
+            </div>
+          </div>
         </section>
       ) : null}
 

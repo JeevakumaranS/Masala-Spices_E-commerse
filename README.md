@@ -5,44 +5,74 @@ This repository is organized as a monorepo with a Next.js storefront in `fronten
 ## Stack
 - Frontend: Next.js 16 + App Router + TypeScript + Tailwind CSS
 - Backend: FastAPI + SQLAlchemy + PostgreSQL + Alembic
-- Local orchestration: Docker Compose
+- Local development: frontend, backend, and PostgreSQL run on the host; RustFS runs in Docker
 
-## Quick start
+## Docker quick start
 
-1. Copy the environment examples and adjust values as needed:
-   - `frontend/.env.example`
-   - `backend/.env.example`
-2. Start local services:
+1. Copy `backend/.env.example` to `backend/.env` and set `ADMIN_TOKEN_SECRET` to a random value of at least 32 bytes.
+2. Start the application:
    ```bash
    docker compose up --build
    ```
 3. Open the app:
    - Frontend: http://localhost:3000
    - Backend: http://localhost:8000/docs
-   - PostgreSQL: localhost:5432
+   - PostgreSQL: localhost:5433
 
-## Windows note: `&` in the project path
+Compose starts PostgreSQL 18, waits for it to become ready, applies backend
+migrations, loads the sample catalog only when the catalog tables are empty,
+then starts the API and storefront. Existing catalog records are preserved. The
+PostgreSQL 18 database uses the `postgres_data_pg18` volume. If you previously ran this project with
+PostgreSQL 16, its `postgres_data` volume is preserved but is not automatically
+migrated; back up and restore that data separately if you need it.
 
-This folder name (`Masala&Spices_E-commerse`) contains an ampersand, which breaks the
-`.cmd`/`.npx` shims — `npm run dev`, `npx next build`, `npx tsc` etc. fail because
-`cmd.exe` treats `&` as a command separator. Two workarounds, both run from `frontend/`:
+## Local development (macOS/Linux)
 
-1. **Call node directly** (no npm shim involved):
-   ```bash
-   node .\node_modules\next\dist\bin\next dev
-   node .\node_modules\next\dist\bin\next build
-   node .\node_modules\next\dist\bin\next start -p 3000
-   node .\node_modules\typescript\bin\tsc --noEmit
-   ```
-2. **Quote the working directory** if you must go through npm: the `&` only breaks when
-   the path is expanded unquoted, so `npm --prefix "E:\Projects\Masala&Spices_E-commerse\frontend" run dev`
-   works while a bare `cd` + `npm run` in some shells does not.
+The backend requires Python 3.12, matching `backend/Dockerfile`. Install Python
+3.12 before creating its virtual environment if `python3.12` is not available.
 
-For local development without Docker, run the backend from `backend/` with
-`.venv\Scripts\python.exe -m uvicorn app.main:app --port 8080`. The frontend
-defaults to `http://localhost:8080` for its API. Browser API requests go through
-the Next.js same-origin proxy; set `API_PROXY_TARGET` when the backend address
-reachable by the Next.js server differs from `NEXT_PUBLIC_API_URL`. The Docker
+Install and configure local PostgreSQL 18 once. This keeps the `DATABASE_URL`
+port at `5433` without running the database in Docker:
+
+```bash
+brew install postgresql@18
+PG_PREFIX="$(brew --prefix postgresql@18)"
+"$PG_PREFIX/bin/pg_ctl" \
+  -D "$(brew --prefix)/var/postgresql@18" \
+  -o "-p 5433" \
+  -l "$(brew --prefix)/var/log/postgresql@18.log" start
+"$PG_PREFIX/bin/psql" -h localhost -p 5433 -d postgres <<'SQL'
+CREATE ROLE masala LOGIN PASSWORD 'masala123';
+CREATE DATABASE masala_db OWNER masala;
+ALTER SYSTEM SET port = '5433';
+SQL
+```
+
+Start the backend in one terminal:
+
+```bash
+cd backend
+python3.12 -m venv .venv
+source .venv/bin/activate
+python -m pip install -r requirements.txt
+alembic upgrade head
+python scripts/seed_data.py
+python -m uvicorn app.main:app --reload --port 8000
+```
+
+Start the frontend in a second terminal:
+
+```bash
+cd frontend
+npm ci
+npm run dev
+```
+
+The local frontend environment targets the API at `http://localhost:8000`.
+Browser API requests use the Next.js same-origin proxy; set `API_PROXY_TARGET`
+if the API has a different address reachable from the Next.js server. To run
+object storage in Docker, use
+`docker compose -f rustfs/docker-compose.yml up -d`. The optional full-stack
 Compose setup targets the backend container at `http://backend:8000`.
 
 ## ISR revalidation note

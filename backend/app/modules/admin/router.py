@@ -41,8 +41,6 @@ from app.modules.admin.auth import bearer, hash_password, issue_token, require_a
 from app.modules.admin.schemas import AdminOverviewResponse, LoginRequest, RegisterAdminRequest
 from app.modules.analytics.router import analytics_summary
 from app.modules.notifications.brevo import send_order_status_email
-from app.modules.orders.catalog import CatalogValidationError, quote_order_items
-from app.modules.orders.schemas import OrderItemInput
 from app.modules.orders.shipping import calculate_shipping
 from app.modules.products.router import hydrate_products
 from app.modules.recipes.schemas import RecipeInput
@@ -53,6 +51,7 @@ logger = logging.getLogger(__name__)
 hero_images_router = APIRouter(tags=["hero images"])
 _OVERVIEW_CACHE_SECONDS = 60
 _OVERVIEW_WIDGET_TIMEOUT_SECONDS = 5
+MAX_HERO_IMAGES = 6
 _overview_cache: dict[str, tuple[float, AdminOverviewResponse]] = {}
 
 
@@ -155,6 +154,10 @@ async def create_hero_image(
     alt_text: str = Form(default=""),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    hero_image_count = await db.scalar(select(func.count()).select_from(hero_images_table))
+    if hero_image_count >= MAX_HERO_IMAGES:
+        raise HTTPException(status_code=409, detail="A maximum of 6 hero images is allowed.")
+
     if not file.content_type or not file.content_type.startswith("image/"):
         raise HTTPException(status_code=400, detail="Only image files are allowed.")
 
@@ -806,62 +809,36 @@ async def _rebuild_order_items(
         for adjustment in adjustments
         if _adjustment_line_key(adjustment) not in existing
     ]
-    quotes_by_key = {}
     if new_adjustments:
-        requested = [
-            OrderItemInput(
-                product_id=adjustment.product_id,
-                variant_id=adjustment.variant_id,
-                qty=adjustment.qty,
-            )
-            for adjustment in new_adjustments
-        ]
-        try:
-            quotes = await quote_order_items(db, requested)
-        except CatalogValidationError as exc:
-            raise HTTPException(status_code=422, detail=str(exc)) from exc
-        quotes_by_key = {
-            (quote.product_id, quote.variant_id): quote
-            for quote in quotes
-        }
+        raise HTTPException(
+            status_code=422,
+            detail="Products cannot be added to existing orders.",
+        )
 
     adjusted: list[dict[str, Any]] = []
     subtotal = Decimal("0")
     for adjustment in adjustments:
         key = _adjustment_line_key(adjustment)
-        previous = existing.get(key)
-        if previous is None:
-            quote = quotes_by_key[key]
-            price = quote.unit_price
-            line = {
-                "product_id": quote.product_id,
-                "variant_id": quote.variant_id,
-                "name": quote.name,
-                "pack_size": quote.pack_size,
-                "sku": quote.sku,
-                "dish_type": quote.dish_type,
-                "categories": list(quote.categories),
-            }
-        else:
-            if adjustment.qty > int(previous["qty"]) and adjustment.variant_id is not None:
-                stock_result = await db.execute(
-                    select(variants_table.c.stock_qty).where(
-                        variants_table.c.id == adjustment.variant_id,
-                        variants_table.c.product_id == adjustment.product_id,
-                    )
+        previous = existing[key]
+        if adjustment.qty > int(previous["qty"]) and adjustment.variant_id is not None:
+            stock_result = await db.execute(
+                select(variants_table.c.stock_qty).where(
+                    variants_table.c.id == adjustment.variant_id,
+                    variants_table.c.product_id == adjustment.product_id,
                 )
-                available_stock = stock_result.scalar_one_or_none()
-                if available_stock is not None and adjustment.qty - int(previous["qty"]) > int(available_stock):
-                    raise HTTPException(
-                        status_code=422,
-                        detail=f"Only {int(available_stock)} additional unit(s) remain for {previous.get('pack_size', 'this pack')}.",
-                    )
-            price = (
-                adjustment.price
-                if "price" in adjustment.model_fields_set and adjustment.price is not None
-                else Decimal(str(previous["price"]))
             )
-            line = dict(previous)
+            available_stock = stock_result.scalar_one_or_none()
+            if available_stock is not None and adjustment.qty - int(previous["qty"]) > int(available_stock):
+                raise HTTPException(
+                    status_code=422,
+                    detail=f"Only {int(available_stock)} additional unit(s) remain for {previous.get('pack_size', 'this pack')}.",
+                )
+        price = (
+            adjustment.price
+            if "price" in adjustment.model_fields_set and adjustment.price is not None
+            else Decimal(str(previous["price"]))
+        )
+        line = dict(previous)
         line.update({
             "qty": adjustment.qty,
             "price": float(price),

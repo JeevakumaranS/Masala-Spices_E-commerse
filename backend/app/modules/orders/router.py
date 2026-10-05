@@ -132,8 +132,10 @@ async def create_order(
                 select(coupons_table).where(coupons_table.c.code == payload.coupon_code)
             )
             managed = managed_result.mappings().first()
-            prior_result = await db.execute(select(orders_table.c.id))
-            previous_orders = [row[0] for row in prior_result]
+            prior_result = await db.execute(
+                select(orders_table.c.phone, orders_table.c.email)
+            )
+            previous_orders = [dict(row) for row in prior_result.mappings()]
             if managed is not None:
                 coupon = calculate_managed_coupon(
                     dict(managed),

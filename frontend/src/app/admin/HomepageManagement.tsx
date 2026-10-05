@@ -12,8 +12,11 @@ import {
   uploadHomepageMedia,
 } from "@/lib/admin";
 import type { HomepageContent, Recipe } from "@/lib/types";
+import { Pagination } from "@/components/ui/Pagination";
+import { SelectField } from "@/components/ui/SelectField";
 import { SmartImage } from "@/components/ui/SmartImage";
-import { PlusIcon, SearchIcon, TrashIcon } from "@/components/ui/icons";
+import { ArrowRightIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/ui/icons";
+import { formatINR } from "@/lib/format";
 
 const fieldClass =
   "mt-1.5 w-full rounded-xl border border-paper-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 outline-none transition focus:border-masala-500 focus:ring-2 focus:ring-masala-500/15";
@@ -22,6 +25,9 @@ const primaryButton =
   "inline-flex items-center justify-center gap-2 rounded-xl bg-masala-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-masala-800 disabled:cursor-not-allowed disabled:opacity-50";
 const secondaryButton =
   "inline-flex items-center justify-center gap-2 rounded-xl border border-paper-200 bg-white px-4 py-2.5 text-sm font-semibold text-ink-700 transition hover:border-masala-300 disabled:cursor-not-allowed disabled:opacity-50";
+const RECENT_ITEMS_LIMIT = 6;
+const ALL_ITEMS_PAGE_SIZE = 12;
+const MAX_HERO_IMAGES = 6;
 
 const homepageSections = [
   { id: "hero", label: "Hero" },
@@ -86,6 +92,10 @@ function matchesSearch(query: string, ...values: string[]) {
   return !normalizedQuery || values.some((value) => value.toLocaleLowerCase().includes(normalizedQuery));
 }
 
+function displayStatus(value: string) {
+  return value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 export function HomepageManagement({ token, products, categories, heroImages, onRefresh }: Props) {
   const [content, setContent] = useState<HomepageContent | null>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
@@ -100,6 +110,8 @@ export function HomepageManagement({ token, products, categories, heroImages, on
   const [tickerDraft, setTickerDraft] = useState("");
   const [activeSection, setActiveSection] = useState<(typeof homepageSections)[number]["id"]>("hero");
   const [sectionSearch, setSectionSearch] = useState<Record<string, string>>({});
+  const [showAllCombos, setShowAllCombos] = useState(false);
+  const [combosPage, setCombosPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
@@ -127,7 +139,7 @@ export function HomepageManagement({ token, products, categories, heroImages, on
   }, [token]);
 
   const comboProducts = useMemo(
-    () => products.filter((product) => product.is_combo),
+    () => products.filter((product) => product.is_combo).sort((left, right) => right.id.localeCompare(left.id)),
     [products],
   );
   const availableCategories = categories.filter(
@@ -142,6 +154,7 @@ export function HomepageManagement({ token, products, categories, heroImages, on
 
   const setSearch = (section: string, value: string) => {
     setSectionSearch((current) => ({ ...current, [section]: value }));
+    if (section === "combos") setCombosPage(1);
   };
 
   const updateTickerLines = (lines: string[]) => {
@@ -182,7 +195,14 @@ export function HomepageManagement({ token, products, categories, heroImages, on
           ...content.combos,
           product_slugs: content.combos.product_slugs.filter((slug) =>
             comboProducts.some((product) => product.slug === slug),
-          ),
+          ).slice(0, 4),
+          offer_codes: [],
+        },
+        recipes: {
+          ...content.recipes,
+          recipe_slugs: content.recipes.recipe_slugs
+            .filter((slug) => recipes.some((recipe) => recipe.slug === slug))
+            .slice(0, 4),
         },
         ticker: tickerDraft.split(/\r?\n/).map((line) => line.trim()).filter(Boolean).slice(0, 20),
       };
@@ -256,9 +276,14 @@ export function HomepageManagement({ token, products, categories, heroImages, on
     }
   };
 
+  const selectedComboCount = content?.combos.product_slugs.filter((slug) =>
+    comboProducts.some((product) => product.slug === slug),
+  ).length ?? 0;
+
   const toggleProduct = (key: "bestsellers" | "combos", slug: string) => {
     if (!content) return;
     const selected = content[key].product_slugs;
+    if (key === "combos" && !selected.includes(slug) && selectedComboCount >= 4) return;
     const product_slugs = selected.includes(slug)
       ? selected.filter((item) => item !== slug)
       : [...selected, slug];
@@ -268,6 +293,7 @@ export function HomepageManagement({ token, products, categories, heroImages, on
   const toggleRecipe = (slug: string) => {
     if (!content) return;
     const selected = content.recipes.recipe_slugs;
+    if (!selected.includes(slug) && selected.length >= 4) return;
     const recipe_slugs = selected.includes(slug)
       ? selected.filter((item) => item !== slug)
       : [...selected, slug];
@@ -286,9 +312,13 @@ export function HomepageManagement({ token, products, categories, heroImages, on
   const filteredCategoryItems = content.categories.items.filter((item) =>
     matchesSearch(sectionSearch.categories ?? "", item.label, item.slug),
   );
-  const selectedComboCount = content.combos.product_slugs.filter((slug) =>
-    comboProducts.some((product) => product.slug === slug),
-  ).length;
+  const filteredComboProducts = comboProducts.filter((product) =>
+    matchesSearch(sectionSearch.combos ?? "", product.name, product.slug, ...product.categories),
+  );
+  const visibleComboChoices = showAllCombos
+    ? filteredComboProducts.slice((combosPage - 1) * ALL_ITEMS_PAGE_SIZE, combosPage * ALL_ITEMS_PAGE_SIZE)
+    : filteredComboProducts.slice(0, RECENT_ITEMS_LIMIT);
+  const heroImageLimitReached = heroImages.length >= MAX_HERO_IMAGES;
 
   return (
     <section className="mt-7">
@@ -326,17 +356,19 @@ export function HomepageManagement({ token, products, categories, heroImages, on
         {activeSection === "hero" ? (
         <SectionCard title="Hero section" description="Manage the carousel images shown on the homepage hero.">
           <SectionSearch id="hero-search" label="Search hero slides" value={sectionSearch.hero ?? ""} onChange={(value) => setSearch("hero", value)} />
+          <p className="mb-3 text-sm text-ink-500" aria-live="polite">{heroImages.length} of {MAX_HERO_IMAGES} hero images</p>
           <div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
             <label className={labelClass}>
               Add carousel photo
-              <input type="file" accept="image/*" className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5`} onChange={(event) => setHeroFile(event.currentTarget.files?.[0] ?? null)} />
+              <input type="file" accept="image/*" disabled={heroImageLimitReached || saving} className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5`} onChange={(event) => setHeroFile(event.currentTarget.files?.[0] ?? null)} />
             </label>
             <label className={labelClass}>
               Image description
               <input className={fieldClass} value={heroAlt} onChange={(event) => setHeroAlt(event.target.value)} />
             </label>
-            <button type="button" className={secondaryButton} disabled={!heroFile || saving} onClick={() => void uploadHero()}><PlusIcon className="size-4" />Add image</button>
+            <button type="button" className={secondaryButton} disabled={!heroFile || saving || heroImageLimitReached} onClick={() => void uploadHero()}><PlusIcon className="size-4" />Add image</button>
           </div>
+          {heroImageLimitReached ? <p className="mt-2 text-sm text-ink-500">Maximum reached. Remove an image to add another.</p> : null}
           {heroImages.length ? (
             heroImages.some((image, index) => matchesSearch(sectionSearch.hero ?? "", image.alt_text, `slide ${index + 1}`)) ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
@@ -411,12 +443,12 @@ export function HomepageManagement({ token, products, categories, heroImages, on
           <div className="flex flex-wrap items-end gap-2">
             <label className={`${labelClass} min-w-64 flex-1`}>
               Add category
-              <select className={fieldClass} value={categoryToAdd} onChange={(event) => setCategoryToAdd(event.target.value)}>
+              <SelectField value={categoryToAdd} onChange={(event) => setCategoryToAdd(event.target.value)}>
                 <option value="">Choose a category</option>
                 {availableCategories.map((category) => (
                   <option key={category.id} value={category.slug}>{category.name}</option>
                 ))}
-              </select>
+              </SelectField>
             </label>
             <button
               type="button"
@@ -490,49 +522,80 @@ export function HomepageManagement({ token, products, categories, heroImages, on
         ) : null}
 
         {activeSection === "combos" ? (
-        <SectionCard title="Better value combos" description="Add or remove catalog combos from the homepage rail.">
-          <SectionSearch id="combos-search" label="Search combos" value={sectionSearch.combos ?? ""} onChange={(value) => setSearch("combos", value)} />
-          <p className="text-sm text-ink-500" aria-live="polite">
-            Showing {selectedComboCount} of {comboProducts.length} available combos on the homepage.
+        <SectionCard title="Homepage combos" description="Choose up to four combos for the homepage. Newest items appear first; unselected combos remain available in the catalog.">
+          <p className="text-sm font-semibold text-ink-700" aria-live="polite">
+            {selectedComboCount} of 4 homepage combos selected
           </p>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-            {comboProducts.filter((product) => matchesSearch(sectionSearch.combos ?? "", product.name, product.slug, ...product.categories)).map((product) => {
-              const selected = content.combos.product_slugs.includes(product.slug);
-              return (
-                <article key={product.id} className="rounded-xl border border-paper-100 bg-paper-50 p-3">
-                  <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-ink-800">
-                    <input type="checkbox" checked={selected} onChange={() => toggleProduct("combos", product.slug)} />
-                    <span className="min-w-0 truncate">{product.name}</span>
-                  </label>
-                  <SmartImage
-                    src={product.images[0]?.url}
-                    alt={product.name}
-                    aspect="aspect-square"
-                    sizes="(max-width: 640px) 50vw, 25vw"
-                    wrapperClassName="mt-3 rounded-lg"
-                    zoom={false}
-                  />
-                </article>
-              );
-            })}
-          </div>
-          {comboProducts.length > 0 && !comboProducts.some((product) => matchesSearch(sectionSearch.combos ?? "", product.name, product.slug, ...product.categories)) ? <p className="text-sm text-ink-500">No combos match that search.</p> : null}
-          {comboProducts.length === 0 ? <p className="text-sm text-ink-500">No combo products are available in the catalog.</p> : null}
+
+          <section aria-labelledby="homepage-combo-choices">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+              <div>
+                <h3 id="homepage-combo-choices" className="font-semibold text-ink-900">Combos</h3>
+                <p className="text-xs text-ink-500">{comboProducts.length} available</p>
+              </div>
+              <div className="flex min-w-0 flex-col gap-2 sm:w-96 sm:flex-row sm:items-center">
+                <div className="min-w-0 flex-1">
+                  <SectionSearch id="combos-search" label="Search combos" value={sectionSearch.combos ?? ""} onChange={(value) => setSearch("combos", value)} />
+                </div>
+                {filteredComboProducts.length > RECENT_ITEMS_LIMIT ? (
+                  <button
+                    type="button"
+                    className={secondaryButton}
+                    aria-expanded={showAllCombos}
+                    onClick={() => { setShowAllCombos((visible) => !visible); setCombosPage(1); }}
+                  >
+                    {showAllCombos ? "Recent 6" : "View all combos"}
+                    <ArrowRightIcon className={`size-4 transition-transform ${showAllCombos ? "rotate-180" : ""}`} />
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            {comboProducts.length ? (
+              <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                {visibleComboChoices.map((product) => {
+                  const selected = content.combos.product_slugs.includes(product.slug);
+                  return (
+                    <article key={product.id} className="rounded-xl border border-paper-200 bg-paper-50 p-3">
+                      <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-ink-800">
+                        <input
+                          type="checkbox"
+                          checked={selected}
+                          disabled={!selected && selectedComboCount >= 4}
+                          onChange={() => toggleProduct("combos", product.slug)}
+                        />
+                        <span className="min-w-0 truncate">{product.name}</span>
+                      </label>
+                      <SmartImage src={product.images[0]?.url} alt={product.name} aspect="aspect-square" sizes="(max-width: 640px) 50vw, 25vw" wrapperClassName="mt-3 rounded-lg" zoom={false} />
+                      <p className="mt-2 text-xs text-ink-600">{formatINR(product.price)} · {displayStatus(product.status)}</p>
+                    </article>
+                  );
+                })}
+              </div>
+            ) : <p className="mt-3 rounded-lg border border-dashed border-paper-300 px-4 py-5 text-sm text-ink-500">No combos have been added yet. Create combos under Combos, then return here to feature them.</p>}
+            {showAllCombos && filteredComboProducts.length > 0 ? (
+              <Pagination page={Math.min(combosPage, Math.max(1, Math.ceil(filteredComboProducts.length / ALL_ITEMS_PAGE_SIZE)))} pageSize={ALL_ITEMS_PAGE_SIZE} total={filteredComboProducts.length} itemLabel="combos" ariaLabel="All homepage combos pagination" onPageChange={setCombosPage} />
+            ) : null}
+          </section>
         </SectionCard>
         ) : null}
 
         {activeSection === "recipes" ? (
-        <SectionCard title="Recipes" description="Choose which recipes appear on the homepage. Manage recipe details in the Recipes section of the admin dashboard.">
+        <SectionCard title="Homepage recipes" description="Choose up to four recipes for the homepage. Removing a selection here only hides it from the homepage; it does not delete the recipe.">
           <SectionSearch id="recipes-search" label="Search recipes" value={sectionSearch.recipes ?? ""} onChange={(value) => setSearch("recipes", value)} />
           <p className="text-sm text-ink-500" aria-live="polite">
-            Showing {content.recipes.recipe_slugs.length} of {recipes.length} available recipes on the homepage.
+            {content.recipes.recipe_slugs.length} of 4 homepage recipe slots selected · {recipes.length} recipes available.
           </p>
           <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
             {recipes.filter((recipe) => matchesSearch(sectionSearch.recipes ?? "", recipe.title, recipe.slug, recipe.cuisine, recipe.dish_type)).map((recipe) => {
               return (
                 <article key={recipe.id} className="rounded-xl border border-paper-100 bg-paper-50 p-3">
                   <label className="flex cursor-pointer items-center gap-2 text-sm font-semibold text-ink-800">
-                    <input type="checkbox" checked={content.recipes.recipe_slugs.includes(recipe.slug)} onChange={() => toggleRecipe(recipe.slug)} />
+                    <input
+                      type="checkbox"
+                      checked={content.recipes.recipe_slugs.includes(recipe.slug)}
+                      disabled={!content.recipes.recipe_slugs.includes(recipe.slug) && content.recipes.recipe_slugs.length >= 4}
+                      onChange={() => toggleRecipe(recipe.slug)}
+                    />
                     <span>{recipe.title}</span>
                   </label>
                   <SmartImage

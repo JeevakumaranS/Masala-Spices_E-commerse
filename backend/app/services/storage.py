@@ -16,6 +16,14 @@ s3 = boto3.client(
     region_name="us-east-1"
 )
 
+public_s3 = boto3.client(
+    "s3",
+    endpoint_url=os.getenv("RUSTFS_PUBLIC_ENDPOINT"),
+    aws_access_key_id=os.getenv("RUSTFS_ACCESS_KEY"),
+    aws_secret_access_key=os.getenv("RUSTFS_SECRET_KEY"),
+    region_name="us-east-1"
+)
+
 BUCKET_NAME = os.getenv("RUSTFS_BUCKET")
 RUSTFS_ENDPOINT = os.getenv("RUSTFS_ENDPOINT")
 logger = logging.getLogger(__name__)
@@ -90,7 +98,7 @@ def delete_object(object_key: str) -> None:
 
 
 def get_file_url(object_name: str, expires_in: int = 3600) -> str:
-    return s3.generate_presigned_url(
+    return public_s3.generate_presigned_url(
         "get_object",
         Params={
             "Bucket": BUCKET_NAME,

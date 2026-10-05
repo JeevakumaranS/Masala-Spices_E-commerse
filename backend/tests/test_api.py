@@ -2,11 +2,14 @@
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from decimal import Decimal
+from io import BytesIO
+from types import SimpleNamespace
 from uuid import uuid4
 
 import psycopg
 import pytest
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from fastapi.testclient import TestClient
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
@@ -18,6 +21,10 @@ from app.core.database import admin_users_table
 from app.modules.admin import router as admin_router
 from app.modules.admin.auth import issue_token, require_admin
 from app.modules.admin.router import CouponInput
+from app.modules.coupons import router as coupons_router
+from app.modules.coupons.schemas import CouponValidateRequest
+from app.modules.orders import router as orders_router
+from app.modules.orders.schemas import OrderCreateRequest
 from app.modules.products.router import hydrate_products
 from app.routers import uploads
 from app.services import storage
@@ -130,6 +137,22 @@ def test_admin_hero_image_list_requires_authentication(client: TestClient) -> No
     response = client.get("/api/admin/hero-images")
 
     assert response.status_code == 401
+
+
+def test_create_hero_image_rejects_upload_after_limit() -> None:
+    class FullHeroSet:
+        async def scalar(self, *_args: object, **_kwargs: object) -> int:
+            return admin_router.MAX_HERO_IMAGES
+
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(admin_router.create_hero_image(
+            file=UploadFile(file=BytesIO(b"image"), filename="hero.jpg"),
+            alt_text="",
+            db=FullHeroSet(),
+        ))
+
+    assert error.value.status_code == 409
+    assert error.value.detail == "A maximum of 6 hero images is allowed."
 
 
 def test_hero_image_response_includes_presigned_url(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -461,6 +484,24 @@ def test_public_collection_endpoints(
     assert isinstance(items, list)
 
 
+def test_blog_admin_crud_requires_authentication(client: TestClient) -> None:
+    post_id = uuid4()
+    payload = {
+        "title": "Admin-only draft",
+        "slug": "admin-only-draft",
+        "category": "Basics",
+        "published_at": "2026-10-05",
+        "hero_image_url": "https://images.example.test/spices.jpg",
+        "body": "A private draft.",
+        "status": "draft",
+    }
+
+    assert client.get("/api/admin/blog").status_code == 401
+    assert client.post("/api/admin/blog", json=payload).status_code == 401
+    assert client.put(f"/api/admin/blog/{post_id}", json=payload).status_code == 401
+    assert client.delete(f"/api/admin/blog/{post_id}").status_code == 401
+
+
 def test_combo_catalog_allows_no_combo_only_packs_after_inventory_reset(client: TestClient) -> None:
     combo_response = client.get("/api/products/double-damaka")
     assert combo_response.status_code == 200, combo_response.text
@@ -496,6 +537,90 @@ def test_active_coupon_listing_contains_only_public_offer_fields(
         "first_order_only",
     }
     assert all(set(offer) <= public_fields for offer in offers)
+
+
+def test_first_order_coupon_validation_reads_prior_order_identity(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phone = "+919876543210"
+    coupon = {
+        "code": "FIRST10",
+        "kind": "percentage",
+        "label": "First order offer",
+        "active": True,
+        "starts_at": None,
+        "ends_at": None,
+        "minimum_order": Decimal("0"),
+        "discount_value": Decimal("10"),
+        "max_discount": None,
+        "first_order_only": True,
+    }
+
+    class MappingResult:
+        def __init__(self, rows: list[dict[str, str]] = (), first: dict | None = None) -> None:
+            self.rows = rows
+            self.first_row = first
+
+        def mappings(self) -> "MappingResult":
+            return self
+
+        def first(self) -> dict | None:
+            return self.first_row
+
+        def __iter__(self):
+            return iter(self.rows)
+
+    class FakeDatabase:
+        def __init__(self) -> None:
+            self.query_count = 0
+
+        async def execute(self, query: object) -> MappingResult:
+            self.query_count += 1
+            if self.query_count == 1:
+                return MappingResult(first=coupon)
+            assert "orders.phone" in str(query)
+            assert "orders.email" in str(query)
+            return MappingResult(rows=[{"phone": phone, "email": "customer@example.com"}])
+
+    async def quote_items(db: object, items: list[object]) -> list[SimpleNamespace]:
+        assert isinstance(db, FakeDatabase)
+        assert items
+        return [SimpleNamespace(unit_price=Decimal("100"), qty=1)]
+
+    monkeypatch.setattr(coupons_router, "quote_order_items", quote_items)
+    response = asyncio.run(coupons_router.validate_coupon(
+        CouponValidateRequest(
+            code="FIRST10",
+            items=[{"product_id": uuid4(), "variant_id": None, "qty": 1}],
+            phone=phone,
+        ),
+        db=FakeDatabase(),
+    ))
+
+    assert response.valid is False
+    assert response.message == "This first-order code has already been used with these details."
+
+    monkeypatch.setattr(orders_router, "quote_order_items", quote_items)
+    with pytest.raises(HTTPException) as error:
+        asyncio.run(orders_router.create_order(
+            OrderCreateRequest(
+                customer_name="Test Customer",
+                phone=phone,
+                email="customer@example.com",
+                address_line="123 Spice Street",
+                city="Chennai",
+                state="Tamil Nadu",
+                postal_code="600001",
+                country_code="IN",
+                delivery_mode="domestic",
+                coupon_code="FIRST10",
+                items=[{"product_id": uuid4(), "variant_id": None, "qty": 1}],
+            ),
+            db=FakeDatabase(),
+        ))
+
+    assert error.value.status_code == 422
+    assert error.value.detail == "This first-order code has already been used with these details."
 
 
 def test_admin_orders_requires_authentication(client: TestClient) -> None:

@@ -22,8 +22,8 @@ import {
 
 const FALLBACK_CATEGORIES: Pick<Category, "name" | "slug">[] = [
   { name: "Breakfast Masalas", slug: "breakfast-masalas" },
-  { name: "Everyday Blends", slug: "everyday-blends" },
-  { name: "Whole Spices", slug: "whole-spices" },
+  { name: "Everyday Blends", slug: "spice-blends" },
+  { name: "Whole Spices", slug: "pure-spices" },
 ];
 
 const STATIC_NAV = [

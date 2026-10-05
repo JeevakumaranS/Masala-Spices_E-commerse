@@ -13,7 +13,7 @@ type Props = {
   /** `compact` drops the description for denser grids. */
   density?: "comfortable" | "compact";
   /** Reduced decoration and motion for the homepage bestseller rail. */
-  cardStyle?: "default" | "bestseller";
+  cardStyle?: "default" | "bestseller" | "deal";
   imageOverride?: string;
   className?: string;
 };
@@ -32,14 +32,18 @@ export function ProductCard({
   const variant = product.variants[0] ?? null;
   const stock = variant?.stock_qty ?? 0;
   const bestsellerStyle = cardStyle === "bestseller";
+  const dealStyle = cardStyle === "deal";
 
   return (
     <article
       className={cn(
-        "group relative flex flex-col overflow-hidden rounded-2xl bg-white",
+        "group relative flex overflow-hidden rounded-2xl bg-white",
+        dealStyle
+          ? "flex-col border border-paper-200"
+          : "flex-col",
         bestsellerStyle
           ? "transition-shadow duration-200 hover:shadow-sm"
-          : "border border-paper-200 transition-all duration-300 hover:-translate-y-1 hover:border-paper-300 hover:shadow-lg",
+          : !dealStyle && "border border-paper-200 transition-all duration-300 hover:-translate-y-1 hover:border-paper-300 hover:shadow-lg",
         className,
       )}
     >
@@ -47,7 +51,7 @@ export function ProductCard({
         <SmartImage
           src={image}
           alt={product.name}
-          aspect={density === "compact" ? "aspect-square" : "aspect-[4/5]"}
+          aspect={dealStyle ? "aspect-[2.4/1]" : density === "compact" ? "aspect-square" : "aspect-[4/5]"}
           priority={priority}
           zoom={!bestsellerStyle}
           className={bestsellerStyle ? "group-hover:scale-[1.02] !duration-200" : undefined}
@@ -68,8 +72,8 @@ export function ProductCard({
         ) : null}
       </Link>
 
-      <div className={cn("flex min-w-0 flex-1 flex-col", density === "compact" ? "p-3" : "p-4 sm:p-5")}>
-        <div className="flex min-w-0 items-center gap-1.5">
+      <div className={cn("flex min-w-0 flex-1 flex-col", density === "compact" ? "p-3" : "p-4 sm:p-5", dealStyle && "min-h-0 p-2")}>
+        {!dealStyle ? <div className="flex min-w-0 items-center gap-1.5">
           <span
             className={cn(
               "chip !border-masala-100 !bg-masala-50 !text-masala-700",
@@ -89,13 +93,14 @@ export function ProductCard({
               {product.categories[0].replace(/-/g, " ")}
             </span>
           ) : null}
-        </div>
+        </div> : null}
 
         <h3
           className={cn(
-            "mt-3 line-clamp-2 font-display leading-snug font-semibold text-ink-950",
+            "font-display leading-snug font-semibold text-ink-950",
+            dealStyle ? "mt-0 line-clamp-1" : "mt-3 line-clamp-2",
             !bestsellerStyle && "transition-colors group-hover:text-masala-800",
-            density === "compact" ? "text-[0.95rem]" : "text-lg",
+            dealStyle ? "text-[0.95rem]" : density === "compact" ? "text-[0.95rem]" : "text-lg",
           )}
         >
           <Link href={href}>{product.name}</Link>
@@ -107,13 +112,13 @@ export function ProductCard({
           </p>
         ) : null}
 
-        <div className={cn("mt-auto", density === "compact" ? "pt-3" : "pt-4")}>
+        <div className={cn(dealStyle ? "mt-8" : "mt-auto", dealStyle ? "" : density === "compact" ? "pt-3" : "pt-4")}>
           <div className="flex items-end justify-between gap-2">
             <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
               <span
                 className={cn(
                   "font-display font-semibold text-ink-950",
-                  density === "compact" ? "text-base" : "text-xl",
+                  dealStyle ? "text-sm" : density === "compact" ? "text-base" : "text-xl",
                 )}
               >
                 {formatINR(product.price)}
@@ -135,7 +140,7 @@ export function ProductCard({
 
           {/* Quick add — always visible on mobile, revealed on hover at md+ */}
           <div className={cn(
-            "mt-3 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100",
+            dealStyle ? "mt-1" : "mt-3 md:opacity-0 md:group-hover:opacity-100 md:focus-within:opacity-100",
             bestsellerStyle
               ? "md:transition-opacity md:duration-200"
               : "md:translate-y-1.5 md:transition-all md:duration-300 md:group-hover:translate-y-0 md:focus-within:translate-y-0",
@@ -144,7 +149,7 @@ export function ProductCard({
               product={product}
               variant={variant}
               appearance="quick"
-              className="pointer-events-auto"
+              className={dealStyle ? "!h-7 !min-h-7 !py-0 text-xs" : "pointer-events-auto"}
             />
           </div>
         </div>

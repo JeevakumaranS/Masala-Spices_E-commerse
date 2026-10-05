@@ -1,13 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import Link from "next/link";
 import type { Category, Product } from "@/lib/types";
 import { ProductCard } from "@/components/ProductCard";
 import { EmptyState } from "@/components/ui/EmptyState";
 import { Reveal } from "@/components/ui/Reveal";
 import { cn } from "@/lib/cn";
-import { CloseIcon, SearchIcon } from "@/components/ui/icons";
+import { ChevronDownIcon, CloseIcon, SearchIcon } from "@/components/ui/icons";
 
 type Props = {
   products: Product[];
@@ -33,6 +33,33 @@ const QUICK_LINKS = [
 const DISH_TYPES = ["Biryani", "Fried Rice", "Kulambu/Curry", "Fry/Varuval", "Sambar/Rasam", "Podi/Idli-Dosa"];
 const SPICE_LEVELS = ["mild", "medium", "hot"];
 const PAGE_SIZE = 12;
+
+function SearchFilterSelect({
+  value,
+  onChange,
+  label,
+  children,
+}: {
+  value: string;
+  onChange: (value: string) => void;
+  label: string;
+  children: ReactNode;
+}) {
+  return (
+    <div className="relative min-w-0">
+      <select
+        className="input !mt-0 h-10 !py-0 !pl-3 !pr-9 appearance-none text-sm leading-none"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+        aria-label={label}
+      >
+        <option value="">{label}</option>
+        {children}
+      </select>
+      <ChevronDownIcon className="pointer-events-none absolute top-1/2 right-3 size-4 -translate-y-1/2 text-ink-400" />
+    </div>
+  );
+}
 
 function editDistance(left: string, right: string): number {
   const row = Array.from({ length: right.length + 1 }, (_, index) => index);
@@ -78,10 +105,7 @@ function Pagination({
   onPageChange: (page: number) => void;
 }) {
   const pageCount = Math.ceil(total / pageSize);
-  if (pageCount <= 1) return null;
 
-  const start = (page - 1) * pageSize + 1;
-  const end = Math.min(page * pageSize, total);
   const pages = new Set<number>([1, pageCount]);
   for (let candidate = Math.max(1, page - 1); candidate <= Math.min(pageCount, page + 1); candidate += 1) {
     pages.add(candidate);
@@ -89,10 +113,7 @@ function Pagination({
   const visiblePages = [...pages].sort((left, right) => left - right);
 
   return (
-    <nav aria-label="Search results pagination" className="mt-6 flex flex-col gap-3 border-t border-paper-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-      <p className="text-sm text-ink-500" aria-live="polite">
-        Showing {start}–{end} of {total} blends
-      </p>
+    <nav aria-label="Search results pagination" className="mt-6 flex justify-end border-t border-paper-200 pt-4">
       <div className="flex flex-wrap items-center gap-1.5">
         <button
           type="button"
@@ -169,7 +190,6 @@ export function SearchClient({ products, categories }: Props) {
   const pageCount = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const visibleResults = results.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const activeCategory = categories.find((item) => item.slug === category) ?? null;
   const hasFilters = query.trim().length > 0 || category !== null || spiceLevel !== null || dishType !== null || priceBand !== null || packSize !== null || vegOnly;
 
   const clearFilters = () => {
@@ -224,24 +244,36 @@ export function SearchClient({ products, categories }: Props) {
             ) : null}
           </div>
           <div className="grid grid-cols-2 gap-2 md:w-[min(100%,34rem)] md:grid-cols-4">
-            <select className="input !mt-0 !py-2.5 text-sm" value={spiceLevel ?? ""} onChange={(event) => { setPage(1); setSpiceLevel(event.target.value || null); }} aria-label="Filter by spice level">
-              <option value="">All spice levels</option>
+            <SearchFilterSelect
+              value={spiceLevel ?? ""}
+              label="Spice level"
+              onChange={(value) => { setPage(1); setSpiceLevel(value || null); }}
+            >
               {SPICE_LEVELS.map((level) => <option key={level} value={level}>{level[0].toUpperCase() + level.slice(1)}</option>)}
-            </select>
-            <select className="input !mt-0 !py-2.5 text-sm" value={dishType ?? ""} onChange={(event) => { setPage(1); setDishType(event.target.value || null); }} aria-label="Filter by dish type">
-              <option value="">All dish types</option>
+            </SearchFilterSelect>
+            <SearchFilterSelect
+              value={dishType ?? ""}
+              label="Dish type"
+              onChange={(value) => { setPage(1); setDishType(value || null); }}
+            >
               {DISH_TYPES.map((dish) => <option key={dish} value={dish}>{dish}</option>)}
-            </select>
-            <select className="input !mt-0 !py-2.5 text-sm" value={priceBand ?? ""} onChange={(event) => { setPage(1); setPriceBand(event.target.value || null); }} aria-label="Filter by price">
-              <option value="">All prices</option>
+            </SearchFilterSelect>
+            <SearchFilterSelect
+              value={priceBand ?? ""}
+              label="Price range"
+              onChange={(value) => { setPage(1); setPriceBand(value || null); }}
+            >
               <option value="under-200">Under ₹200</option>
               <option value="200-300">₹200–₹300</option>
               <option value="over-300">Over ₹300</option>
-            </select>
-            <select className="input !mt-0 !py-2.5 text-sm" value={packSize ?? ""} onChange={(event) => { setPage(1); setPackSize(event.target.value || null); }} aria-label="Filter by pack size">
-              <option value="">All pack sizes</option>
+            </SearchFilterSelect>
+            <SearchFilterSelect
+              value={packSize ?? ""}
+              label="Pack size"
+              onChange={(value) => { setPage(1); setPackSize(value || null); }}
+            >
               {Array.from(new Set(products.flatMap((product) => product.variants.map((variant) => variant.pack_size)))).map((size) => <option key={size} value={size}>{size}</option>)}
-            </select>
+            </SearchFilterSelect>
           </div>
         </div>
         <div className="mt-3 flex flex-wrap items-center justify-between gap-3 border-t border-paper-100 pt-3">
@@ -313,18 +345,6 @@ export function SearchClient({ products, categories }: Props) {
           <span />
         )}
 
-        <p aria-live="polite" className="shrink-0 text-sm text-ink-500">
-          Showing{" "}
-          <span className="font-display font-semibold text-ink-950">{results.length}</span>{" "}
-          of {products.length} {products.length === 1 ? "blend" : "blends"}
-          {query.trim() ? (
-            <>
-              {" "}
-              for <span className="font-medium text-ink-800">“{query.trim()}”</span>
-            </>
-          ) : null}
-          {activeCategory ? <> in {activeCategory.name}</> : null}
-        </p>
       </div>
 
       {/* ------------------------ Results ------------------------ */}

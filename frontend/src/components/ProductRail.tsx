@@ -2,7 +2,6 @@ import Link from "next/link";
 import type { Product } from "@/lib/types";
 import { ProductCard } from "@/components/ProductCard";
 import { ArrowRightIcon } from "@/components/ui/icons";
-import { cn } from "@/lib/cn";
 
 export function ProductRail({
   products,
@@ -10,31 +9,28 @@ export function ProductRail({
   description,
   navigationHref,
   sectionClassName = "bg-white py-5 md:py-6",
-  navigationButtonClassName,
 }: {
   products: Product[];
   title: string;
   description?: string;
   navigationHref?: string;
   sectionClassName?: string;
-  navigationButtonClassName?: string;
 }) {
   return (
     <section className={sectionClassName}>
       <div className="shell">
-        <div className="relative">
-          <h2 className="section-title section-title--sm text-center">{title}</h2>
-          {description ? <p className="mt-2 text-center text-sm text-ink-500">{description}</p> : null}
+        <div className="flex flex-col items-center gap-2 sm:relative sm:block">
+          <div className="text-center sm:mx-auto sm:max-w-[calc(100%-11rem)]">
+            <h2 className="section-title text-[1.375rem] text-center md:text-[1.625rem]">{title}</h2>
+            {description ? <p className="mt-1.5 text-center text-xs text-ink-500 sm:text-sm">{description}</p> : null}
+          </div>
           {navigationHref ? (
             <Link
               href={navigationHref}
-              className={cn(
-                "absolute top-1/2 right-0 grid size-9 -translate-y-1/2 place-items-center rounded-full border border-paper-200 bg-white text-masala-700",
-                navigationButtonClassName,
-              )}
-              aria-label={`View all ${title.toLowerCase()}`}
+              className="group inline-flex shrink-0 items-center gap-2 text-sm font-semibold text-masala-700 transition hover:text-masala-900 sm:absolute sm:top-1/2 sm:right-0 sm:-translate-y-1/2"
             >
-              <ArrowRightIcon className="size-4" />
+              View all {title.toLowerCase()}
+              <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-1" />
             </Link>
           ) : null}
         </div>

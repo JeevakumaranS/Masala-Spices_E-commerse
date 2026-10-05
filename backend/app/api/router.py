@@ -5,9 +5,11 @@ from fastapi import APIRouter
 from app.modules.admin.router import hero_images_router, router as admin_router
 from app.modules.analytics.router import router as analytics_router
 from app.modules.analytics.router import admin_router as admin_analytics_router
+from app.modules.blog.router import admin_router as admin_blog_router
 from app.modules.blog.router import router as blog_router
 from app.modules.categories.router import router as categories_router
 from app.modules.coupons.router import router as coupons_router
+from app.modules.enquiries.router import admin_router as admin_messages_router
 from app.modules.enquiries.router import router as enquiries_router
 from app.modules.health.router import router as health_router
 from app.modules.homepage.router import router as homepage_router
@@ -33,3 +35,5 @@ api_router.include_router(blog_router)
 api_router.include_router(stores_router)
 api_router.include_router(analytics_router)
 api_router.include_router(enquiries_router)
+api_router.include_router(admin_blog_router)
+api_router.include_router(admin_messages_router)
