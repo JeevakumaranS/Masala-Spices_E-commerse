@@ -1,0 +1,8 @@
+{
+    "chat.tools.terminal.autoApprove": {
+        "/^awk -F= '\\{print \\$1 \"=<redacted>\"\\}' rustfs/\\.env$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
+    }
+}
