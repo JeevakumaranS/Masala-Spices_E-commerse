@@ -13,7 +13,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.database import blog_posts_table, get_db
 from app.modules.admin.auth import require_admin
 from app.modules.blog.schemas import BlogPostInput
-from app.services.storage import get_file_url, object_exists
+from app.services.media_cleanup import delete_unreferenced_objects
+from app.services.storage import get_file_url, get_object_key, object_exists
 
 router = APIRouter(prefix="/api/blog", tags=["blog"])
 admin_router = APIRouter(prefix="/api/admin/blog", tags=["admin-blog"])
@@ -105,6 +106,13 @@ async def update_blog_post(
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
     try:
+        previous_result = await db.execute(
+            select(blog_posts_table.c.hero_image_url)
+            .where(blog_posts_table.c.id == post_id)
+        )
+        previous_image_url = previous_result.scalar_one_or_none()
+        if previous_image_url is None:
+            raise HTTPException(status_code=404, detail="Blog post not found.")
         result = await db.execute(
             update(blog_posts_table)
             .where(blog_posts_table.c.id == post_id)
@@ -121,6 +129,18 @@ async def update_blog_post(
         if post is None:
             raise HTTPException(status_code=404, detail="Blog post not found.")
         await db.commit()
+        previous_image_key = get_object_key(previous_image_url)
+        current_image_key = get_object_key(payload.hero_image_key)
+        replaced_image_keys = (
+            {previous_image_key} - {current_image_key}
+            if previous_image_key
+            else set()
+        )
+        await delete_unreferenced_objects(
+            db,
+            replaced_image_keys,
+            context=f"blog-post:{post_id}",
+        )
         return dict(post)
     except IntegrityError as exc:
         await db.rollback()
@@ -129,9 +149,22 @@ async def update_blog_post(
 
 @admin_router.delete("/{post_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_blog_post(post_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
+    existing = await db.execute(
+        select(blog_posts_table.c.hero_image_url)
+        .where(blog_posts_table.c.id == post_id)
+    )
+    image_url = existing.scalar_one_or_none()
+    if image_url is None:
+        raise HTTPException(status_code=404, detail="Blog post not found.")
     result = await db.execute(
         delete(blog_posts_table).where(blog_posts_table.c.id == post_id)
     )
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Blog post not found.")
     await db.commit()
+    image_key = get_object_key(image_url)
+    await delete_unreferenced_objects(
+        db,
+        {image_key} if image_key else set(),
+        context=f"blog-post:{post_id}",
+    )
