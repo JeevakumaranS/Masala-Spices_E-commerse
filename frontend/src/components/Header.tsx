@@ -208,7 +208,12 @@ export function Header() {
     <header className="sticky top-0 z-50">
       {/* ---------- Announcement ---------- */}
       {activeAnnouncement ? (
-        <div className="relative overflow-hidden bg-ink-950 text-paper-100">
+        <div
+          className={cn(
+            "relative overflow-hidden bg-ink-950 text-paper-100 transition-[max-height,opacity] duration-300 sm:max-h-9 sm:opacity-100",
+            scrolled ? "invisible max-h-0 opacity-0 sm:visible" : "visible max-h-9 opacity-100",
+          )}
+        >
           <div className="shell flex h-9 items-center justify-center">
             <Link
               key={announcement}
@@ -229,13 +234,13 @@ export function Header() {
       {/* ---------- Main bar ---------- */}
       <div
         className={cn(
-          "bg-transparent px-3 transition-all duration-300 sm:px-5",
+          "bg-transparent px-3 transition-all duration-300 max-[374px]:px-2 sm:px-5",
           scrolled ? "py-2 md:py-2" : "py-3 md:py-5",
         )}
       >
         <div
           className={cn(
-            "shell relative flex items-center justify-between gap-3 rounded-full bg-gradient-to-r from-[#6F2414] via-[#8B2A15] to-[#A65331] text-paper-50 transition-all duration-300",
+            "shell relative flex items-center justify-between gap-3 rounded-full bg-gradient-to-r from-[#6F2414] via-[#8B2A15] to-[#A65331] text-paper-50 transition-all duration-300 max-[374px]:gap-1.5 max-[374px]:px-2",
             scrolled
               ? "min-h-11 px-2.5 shadow-xl shadow-ink-950/20 sm:px-3.5 md:min-h-13 md:px-4.5"
               : "min-h-13 px-3 shadow-lg shadow-ink-950/10 sm:px-4 md:min-h-15 md:px-5",
@@ -243,6 +248,7 @@ export function Header() {
         >
           <Logo
             tone="dark"
+            compact
             className="shrink-0 lg:absolute lg:left-1/2 lg:-translate-x-1/2"
           />
 
@@ -333,7 +339,7 @@ export function Header() {
           </nav>
 
           {/* Actions */}
-          <div className="flex items-center gap-1.5 sm:gap-2">
+          <div className="flex items-center gap-1.5 max-[374px]:gap-1 sm:gap-2">
             <button
               type="button"
               onClick={openSearch}
@@ -351,7 +357,7 @@ export function Header() {
               type="button"
               onClick={openSearch}
               aria-label="Search"
-              className="btn btn-ghost btn-icon btn-sm md:hidden"
+              className="btn btn-ghost btn-icon btn-sm max-[374px]:size-8 md:hidden"
             >
               <SearchIcon className="size-5" />
             </button>
@@ -367,7 +373,7 @@ export function Header() {
             <Link
               href="/watchlist"
               aria-label={watchlistCount > 0 ? `Open watchlist, ${watchlistCount} saved items` : "Open watchlist"}
-              className="relative grid size-9 place-items-center rounded-full bg-paper-50 text-ink-950 transition hover:bg-white"
+              className="relative grid size-9 place-items-center rounded-full bg-paper-50 text-ink-950 transition hover:bg-white max-[374px]:size-8"
             >
               <HeartIcon className={cn("size-4.5", watchlistCount > 0 && "fill-masala-600 text-masala-600")} />
               <span
@@ -389,7 +395,7 @@ export function Header() {
               aria-label={
                 cartCount > 0 ? `Open cart, ${cartCount} items` : "Open cart"
               }
-              className="relative grid size-10 place-items-center rounded-full bg-paper-50 text-ink-950 transition hover:bg-white"
+              className="relative grid size-10 place-items-center rounded-full bg-paper-50 text-ink-950 transition hover:bg-white max-[374px]:size-8"
             >
               <BagIcon className="size-5" />
               <span
@@ -410,7 +416,7 @@ export function Header() {
               onClick={() => setMobileOpen((v) => !v)}
               aria-label={mobileOpen ? "Close menu" : "Open menu"}
               aria-expanded={mobileOpen}
-              className="grid size-10 place-items-center rounded-full text-paper-50 transition hover:bg-white/10 lg:hidden"
+              className="grid size-10 place-items-center rounded-full text-paper-50 transition hover:bg-white/10 max-[374px]:size-8 lg:hidden"
             >
               {mobileOpen ? (
                 <CloseIcon className="size-5" />

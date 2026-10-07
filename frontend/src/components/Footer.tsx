@@ -126,7 +126,7 @@ export function Footer() {
         </div>
 
         {COLUMNS.map((column) => (
-          <nav key={column.title} aria-label={column.title}>
+          <nav key={column.title} aria-label={column.title} className="hidden md:block">
             <h3 className="text-[0.7rem] font-bold tracking-[0.2em] text-[#F0956B] uppercase">
               {column.title}
             </h3>

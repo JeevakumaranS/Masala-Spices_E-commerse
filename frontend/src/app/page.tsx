@@ -216,9 +216,9 @@ export default async function HomePage() {
             </div>
           </Reveal>
 
-            <div className="mt-6 grid gap-5 md:grid-cols-4">
+            <div className="no-scrollbar -mx-5 mt-6 flex snap-x snap-mandatory gap-5 overflow-x-auto px-5 pb-2 md:mx-0 md:grid md:grid-cols-4 md:overflow-visible md:px-0 md:pb-0">
               {featuredRecipes.map((recipe, index) => (
-                <Reveal key={recipe.slug} delay={index * 90} className="h-full">
+                <Reveal key={recipe.slug} delay={index * 90} className="h-full w-[82%] max-w-sm shrink-0 snap-start md:w-auto md:max-w-none md:shrink">
                   <Link
                     href={`/recipes/${recipe.slug}`}
                     className="group flex h-full flex-col overflow-hidden rounded-3xl border border-paper-200 bg-paper-50 transition-all duration-300 hover:-translate-y-1 hover:border-saffron-400 hover:bg-white"
