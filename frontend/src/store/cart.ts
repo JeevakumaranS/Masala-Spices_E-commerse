@@ -3,6 +3,7 @@
 import { useSyncExternalStore } from "react";
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { persistGuestCart } from "@/lib/guest-api";
 import {
   DOMESTIC_SHIPPING_FEE,
   FREE_SHIPPING_THRESHOLD,
@@ -15,6 +16,7 @@ export type CartLine = {
   key: string;
   id: string;
   variantId: string | null;
+  isCombo?: boolean;
   name: string;
   slug: string;
   category: string;
@@ -56,7 +58,7 @@ const lineKey = (id: string, variantId: string | null) => `${id}:${variantId ?? 
 
 export const useCartStore = create<CartStore>()(
   persist(
-    (set) => ({
+    (set, get) => ({
       lines: [],
       promoCode: null,
       promoDiscount: null,
@@ -64,7 +66,7 @@ export const useCartStore = create<CartStore>()(
       deliveryMode: "domestic",
       destinationCountry: "IN",
 
-      add: (input, qty = 1) =>
+      add: (input, qty = 1) => {
         set((state) => {
           const key = lineKey(input.id, input.variantId);
           const existing = state.lines.find((line) => line.key === key);
@@ -96,16 +98,20 @@ export const useCartStore = create<CartStore>()(
             promoDiscount: null,
             promoLabel: null,
           };
-        }),
+        });
+        persistGuestCart(get().lines);
+      },
 
-      remove: (key) =>
+      remove: (key) => {
         set((state) => ({
           lines: state.lines.filter((l) => l.key !== key),
           promoDiscount: null,
           promoLabel: null,
-        })),
+        }));
+        persistGuestCart(get().lines);
+      },
 
-      setQty: (key, qty) =>
+      setQty: (key, qty) => {
         set((state) => ({
           lines:
             qty <= 0
@@ -117,7 +123,9 @@ export const useCartStore = create<CartStore>()(
                 ),
           promoDiscount: null,
           promoLabel: null,
-        })),
+        }));
+        persistGuestCart(get().lines);
+      },
 
       setPromoCode: (code, verifiedDiscount = null, label = null) =>
         set({
@@ -135,7 +143,7 @@ export const useCartStore = create<CartStore>()(
 
       setDestinationCountry: (countryCode) => set({ destinationCountry: countryCode }),
 
-      clear: () =>
+      clear: () => {
         set({
           lines: [],
           promoCode: null,
@@ -143,7 +151,9 @@ export const useCartStore = create<CartStore>()(
           promoLabel: null,
           deliveryMode: "domestic",
           destinationCountry: "IN",
-        }),
+        });
+        persistGuestCart([]);
+      },
     }),
     {
       name: "masala-house-cart-v1",

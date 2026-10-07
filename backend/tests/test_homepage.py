@@ -1,11 +1,16 @@
 """Focused tests for the editable homepage content contract."""
 
+import asyncio
+
 import pytest
 from fastapi import HTTPException
+from fastapi.testclient import TestClient
 from pydantic import ValidationError
 
+from app.core.application import create_app
 from app.modules.homepage.schemas import DEFAULT_HOME_PAGE_CONTENT, HomePageContent
-from app.modules.homepage.router import _validate_import_url
+from app.modules.homepage import router as homepage_router
+from app.modules.homepage.router import save_homepage_content
 
 
 def test_homepage_content_defaults_validate_all_editable_sections() -> None:
@@ -13,6 +18,7 @@ def test_homepage_content_defaults_validate_all_editable_sections() -> None:
 
     assert "hero" not in content.model_dump()
     assert len(content.categories.items) == 5
+    assert all(not item.image_url for item in content.categories.items)
     assert content.bestsellers.title == "Bestsellers"
     assert content.bestsellers.product_slugs == []
     assert not hasattr(content.bestsellers, "description")
@@ -53,33 +59,31 @@ def test_homepage_content_rejects_excessive_ticker_items() -> None:
         HomePageContent.model_validate(payload)
 
 
-@pytest.mark.parametrize(
-    "image_url",
-    [
-        "http://images.unsplash.com/photo.jpg",
-        "https://localhost/image.jpg",
-        "https://images.unsplash.com.evil.test/photo.jpg",
-        "https://user:password@images.unsplash.com/photo.jpg",
-        "https://images.unsplash.com:8443/photo.jpg",
-    ],
-)
-def test_homepage_image_import_rejects_untrusted_sources(image_url: str) -> None:
+def test_homepage_settings_reject_photo_urls() -> None:
+    payload = DEFAULT_HOME_PAGE_CONTENT.model_copy(deep=True)
+    payload.categories.items[0].image_url = "https://images.example.test/photo.jpg"
+
     with pytest.raises(HTTPException) as error:
-        _validate_import_url(image_url)
+        asyncio.run(save_homepage_content(payload, None))
+
     assert error.value.status_code == 422
 
 
-@pytest.mark.parametrize(
-    "image_url",
-    [
-        "https://images.unsplash.com/photo-123.jpg",
-        "https://imgs.search.brave.com/photo.jpg",
-        "https://shop.cookdtv.com/cdn/shop/files/cat-kulambu.png",
-        "https://img.magnific.com/free-psd/spices.jpg",
-        "https://tiimg.tistatic.com/fp/1/007/630/turmeric.jpg",
-        "https://images.jdmagicbox.com/quickquotes/images_main/pickles.png",
-        "https://assets.cookdtv.com/t/640/recipe-image",
-    ],
-)
-def test_homepage_image_import_allows_known_image_sources(image_url: str) -> None:
-    assert _validate_import_url(image_url) == image_url
+def test_about_image_endpoint_returns_signed_rustfs_url(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        homepage_router,
+        "get_file_url",
+        lambda image_key: f"https://storage.example/{image_key}?signature=test",
+    )
+
+    response = TestClient(create_app()).get("/api/about-image")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "image_url": (
+            f"https://storage.example/{homepage_router.ABOUT_IMAGE_KEY}"
+            "?signature=test"
+        )
+    }

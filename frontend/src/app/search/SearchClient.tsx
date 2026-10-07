@@ -8,6 +8,7 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Reveal } from "@/components/ui/Reveal";
 import { cn } from "@/lib/cn";
 import { ChevronDownIcon, CloseIcon, SearchIcon } from "@/components/ui/icons";
+import { getStartingPrice } from "@/lib/productPricing";
 
 type Props = {
   products: Product[];
@@ -30,7 +31,6 @@ const QUICK_LINKS = [
   { label: "Bulk orders", href: "/pages/bulk-order" },
 ];
 
-const DISH_TYPES = ["Biryani", "Fried Rice", "Kulambu/Curry", "Fry/Varuval", "Sambar/Rasam", "Podi/Idli-Dosa"];
 const SPICE_LEVELS = ["mild", "medium", "hot"];
 const PAGE_SIZE = 12;
 
@@ -76,7 +76,7 @@ function editDistance(left: string, right: string): number {
 }
 
 function matchesSearch(product: Product, query: string): boolean {
-  const terms = [product.name, product.description, product.dish_type ?? "", ...product.categories, ...product.ingredients]
+  const terms = [product.name, product.description, product.spice_level, ...product.categories]
     .join(" ")
     .toLowerCase();
   if (terms.includes(query)) return true;
@@ -164,10 +164,8 @@ export function SearchClient({ products, categories }: Props) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState<string | null>(null);
   const [spiceLevel, setSpiceLevel] = useState<string | null>(null);
-  const [dishType, setDishType] = useState<string | null>(null);
   const [priceBand, setPriceBand] = useState<string | null>(null);
   const [packSize, setPackSize] = useState<string | null>(null);
-  const [vegOnly, setVegOnly] = useState(false);
   const [page, setPage] = useState(1);
 
   const results = useMemo(() => {
@@ -176,31 +174,28 @@ export function SearchClient({ products, categories }: Props) {
       const inCategory = category === null || product.categories.includes(category);
       if (!inCategory) return false;
       if (spiceLevel !== null && product.spice_level !== spiceLevel) return false;
-      if (dishType !== null && product.dish_type !== dishType) return false;
-      if (priceBand === "under-200" && product.price >= 200) return false;
-      if (priceBand === "200-300" && (product.price < 200 || product.price > 300)) return false;
-      if (priceBand === "over-300" && product.price <= 300) return false;
+      const price = getStartingPrice(product);
+      if (priceBand === "under-200" && price >= 200) return false;
+      if (priceBand === "200-300" && (price < 200 || price > 300)) return false;
+      if (priceBand === "over-300" && price <= 300) return false;
       if (packSize !== null && !product.variants.some((variant) => variant.pack_size === packSize)) return false;
-      if (vegOnly && product.is_veg === false) return false;
       if (!needle) return true;
       return matchesSearch(product, needle);
     });
-  }, [products, query, category, spiceLevel, dishType, priceBand, packSize, vegOnly]);
+  }, [products, query, category, spiceLevel, priceBand, packSize]);
 
   const pageCount = Math.max(1, Math.ceil(results.length / PAGE_SIZE));
   const currentPage = Math.min(page, pageCount);
   const visibleResults = results.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
-  const hasFilters = query.trim().length > 0 || category !== null || spiceLevel !== null || dishType !== null || priceBand !== null || packSize !== null || vegOnly;
+  const hasFilters = query.trim().length > 0 || category !== null || spiceLevel !== null || priceBand !== null || packSize !== null;
 
   const clearFilters = () => {
     setPage(1);
     setQuery("");
     setCategory(null);
     setSpiceLevel(null);
-    setDishType(null);
     setPriceBand(null);
     setPackSize(null);
-    setVegOnly(false);
   };
 
   const applySearch = (term: string) => {
@@ -224,7 +219,7 @@ export function SearchClient({ products, categories }: Props) {
                 setPage(1);
                 setQuery(event.target.value);
               }}
-              placeholder="Search products, ingredients or dishes"
+              placeholder="Search products by name, category or description"
               autoComplete="off"
               aria-label="Search products"
               className="input !mt-0 !py-3 !pl-10 !pr-10 text-sm [&::-webkit-search-cancel-button]:hidden"
@@ -250,13 +245,6 @@ export function SearchClient({ products, categories }: Props) {
               onChange={(value) => { setPage(1); setSpiceLevel(value || null); }}
             >
               {SPICE_LEVELS.map((level) => <option key={level} value={level}>{level[0].toUpperCase() + level.slice(1)}</option>)}
-            </SearchFilterSelect>
-            <SearchFilterSelect
-              value={dishType ?? ""}
-              label="Dish type"
-              onChange={(value) => { setPage(1); setDishType(value || null); }}
-            >
-              {DISH_TYPES.map((dish) => <option key={dish} value={dish}>{dish}</option>)}
             </SearchFilterSelect>
             <SearchFilterSelect
               value={priceBand ?? ""}
@@ -293,10 +281,6 @@ export function SearchClient({ products, categories }: Props) {
                 ))}
               </div>
             ) : null}
-            <label className="flex items-center gap-2 text-xs font-medium text-ink-600">
-              <input type="checkbox" checked={vegOnly} onChange={(event) => { setPage(1); setVegOnly(event.target.checked); }} />
-              Veg only
-            </label>
           </div>
           {hasFilters ? (
             <button type="button" onClick={clearFilters} className="text-xs font-semibold text-masala-700 hover:text-masala-900">

@@ -17,7 +17,10 @@ if config.config_file_name is not None:
 load_dotenv()
 target_metadata = None
 
-config.set_main_option("sqlalchemy.url", os.getenv("DATABASE_URL", "postgresql+asyncpg://postgres:user@localhost:5432/masala_db"))
+database_url = os.getenv("DATABASE_URL")
+if not database_url:
+    raise RuntimeError("DATABASE_URL must be configured before running migrations.")
+config.set_main_option("sqlalchemy.url", database_url)
 
 
 def run_migrations_offline() -> None:

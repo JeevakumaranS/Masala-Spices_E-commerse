@@ -11,7 +11,11 @@ const fraunces = Fraunces({
   display: "swap",
 });
 
-const siteUrl = process.env.NEXT_PUBLIC_SITE_URL ?? "http://localhost:3000";
+const siteUrl = process.env.NEXT_PUBLIC_SITE_URL;
+
+if (!siteUrl) {
+  throw new Error("NEXT_PUBLIC_SITE_URL must be configured.");
+}
 
 export const metadata: Metadata = {
   metadataBase: new URL(siteUrl),
@@ -38,14 +42,6 @@ export const metadata: Metadata = {
     title: "Masala House | Freshly ground spice blends",
     description:
       "Small-batch masalas, whole spices and recipe-first blends — roasted and ground the slow way.",
-    images: [
-      {
-        url: "https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=1200&q=80",
-        width: 1200,
-        height: 630,
-        alt: "Assorted whole spices and ground masalas",
-      },
-    ],
   },
   twitter: {
     card: "summary_large_image",

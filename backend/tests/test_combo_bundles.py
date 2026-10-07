@@ -10,13 +10,12 @@ from pydantic import ValidationError
 from sqlalchemy.dialects import postgresql
 
 from app.core.database import (
-    combo_catalog_products_table,
     combos_table,
     metadata,
     products_table,
     variants_table,
 )
-from app.modules.admin.router import OrderLineAdjustment, ProductInput, _rebuild_order_items
+from app.modules.admin.router import ComboInput, OrderLineAdjustment, _rebuild_order_items
 from app.modules.orders.catalog import CatalogValidationError, quote_order_items
 from app.modules.orders.catalog import QuotedOrderItem
 from app.modules.orders.router import _deduct_order_inventory
@@ -42,7 +41,6 @@ def _combo_payload(
     price: str = "80",
 ) -> dict[str, object]:
     return {
-        "is_combo": True,
         "name": "Weeknight combo",
         "slug": "weeknight-combo",
         "price": price,
@@ -54,12 +52,12 @@ def _combo_payload(
 
 def test_combo_requires_at_least_one_product_type() -> None:
     with pytest.raises(ValidationError, match="at least one product"):
-        ProductInput.model_validate(_combo_payload())
+        ComboInput.model_validate(_combo_payload())
 
 
 def test_combo_requires_discount_below_combined_mrp() -> None:
     with pytest.raises(ValidationError, match="lower than the combined regular price"):
-        ProductInput.model_validate(_combo_payload(
+        ComboInput.model_validate(_combo_payload(
             combo_catalog_products=[{
                 "product_id": str(uuid4()),
                 "variant_id": str(uuid4()),
@@ -73,14 +71,12 @@ def test_combo_storage_is_separate_from_products_and_bundle_json() -> None:
     assert combos_table.name == "combos"
     assert "combo_products" not in metadata.tables
     assert "bundle_items" not in products_table.c
-    assert {"combo_id", "product_id", "variant_id", "quantity"} <= set(
-        combo_catalog_products_table.c.keys()
-    )
+    assert "catalog_products" in combos_table.c
 
 def test_combo_input_accepts_regular_catalog_products() -> None:
     product_id = uuid4()
     variant_id = uuid4()
-    combo = ProductInput.model_validate(_combo_payload(
+    combo = ComboInput.model_validate(_combo_payload(
         combo_catalog_products=[{
             "product_id": str(product_id),
             "variant_id": str(variant_id),
@@ -121,14 +117,13 @@ def test_combo_quote_checks_regular_catalog_component_stock() -> None:
         "status": "active",
         "categories": ["combos-packs"],
         "is_combo": True,
-    }
-    component = {
-        "id": uuid4(),
-        "combo_id": combo_id,
-        "product_id": product_id,
-        "variant_id": variant_id,
-        "quantity": 2,
-        "sort_order": 0,
+        "catalog_products": [{
+            "id": str(uuid4()),
+            "product_id": str(product_id),
+            "variant_id": str(variant_id),
+            "quantity": 2,
+            "sort_order": 0,
+        }],
     }
     variant = {
         "id": variant_id,
@@ -139,7 +134,7 @@ def test_combo_quote_checks_regular_catalog_component_stock() -> None:
         "mrp": Decimal("50"),
         "stock_qty": 4,
     }
-    db = _FakeDatabase([[], [combo], [component], [variant]])
+    db = _FakeDatabase([[], [combo], [variant]])
 
     quoted = asyncio.run(quote_order_items(db, [OrderItemInput(product_id=combo_id, qty=2)]))
 
@@ -157,14 +152,13 @@ def test_combo_quote_rejects_insufficient_regular_catalog_component_stock() -> N
         "status": "active",
         "categories": ["combos-packs"],
         "is_combo": True,
-    }
-    component = {
-        "id": uuid4(),
-        "combo_id": combo_id,
-        "product_id": product_id,
-        "variant_id": variant_id,
-        "quantity": 2,
-        "sort_order": 0,
+        "catalog_products": [{
+            "id": str(uuid4()),
+            "product_id": str(product_id),
+            "variant_id": str(variant_id),
+            "quantity": 2,
+            "sort_order": 0,
+        }],
     }
     variant = {
         "id": variant_id,
@@ -175,7 +169,7 @@ def test_combo_quote_rejects_insufficient_regular_catalog_component_stock() -> N
         "mrp": Decimal("50"),
         "stock_qty": 3,
     }
-    db = _FakeDatabase([[], [combo], [component], [variant]])
+    db = _FakeDatabase([[], [combo], [variant]])
 
     with pytest.raises(CatalogValidationError, match="Only 3 unit"):
         asyncio.run(quote_order_items(db, [OrderItemInput(product_id=combo_id, qty=2)]))

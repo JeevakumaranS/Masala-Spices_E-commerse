@@ -4,6 +4,8 @@ export type Category = {
   slug: string;
   type: string;
   description?: string;
+  image_key?: string | null;
+  image_url?: string | null;
 };
 
 export type ProductImage = {
@@ -44,18 +46,15 @@ export type Product = {
   name: string;
   slug: string;
   description: string;
-  ingredients: string[];
-  price: number;
-  mrp: number;
-  discount_pct: number;
+  price?: number;
+  mrp?: number;
+  discount_pct?: number;
   spice_level: string;
   status: string;
   is_combo: boolean;
   categories: string[];
   dish_type?: string | null;
-  is_veg?: boolean;
   contains_salt?: boolean;
-  net_weight?: string | null;
   meal_cost?: number | null;
   rating?: number | null;
   review_count?: number;

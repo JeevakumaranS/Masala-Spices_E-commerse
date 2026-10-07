@@ -5,18 +5,9 @@ import { useState } from "react";
 import { cn } from "@/lib/cn";
 import { LeafIcon } from "@/components/ui/icons";
 
-/** Hosts whitelisted in `next.config.ts` → `images.remotePatterns`. */
-const ALLOWED_HOSTS = new Set([
-  "images.unsplash.com",
-  "plus.unsplash.com",
-  "shop.cookdtv.com",
-  "img.magnific.com",
-  "tiimg.tistatic.com",
-  "images.jdmagicbox.com",
-  "assets.cookdtv.com",
-  "localhost",
-  "127.0.0.1",
-]);
+const rustfsPublicOrigin = process.env.NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT
+  ? new URL(process.env.NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT).origin
+  : null;
 
 function isRenderable(src: string): boolean {
   if (!src) return false;
@@ -24,16 +15,16 @@ function isRenderable(src: string): boolean {
   try {
     const url = new URL(src);
     if (url.protocol !== "http:" && url.protocol !== "https:") return false;
-    return ALLOWED_HOSTS.has(url.hostname);
+    return url.origin === rustfsPublicOrigin;
   } catch {
     return false;
   }
 }
 
-function isLocalRustfsImage(src: string): boolean {
+function isRustfsImage(src: string): boolean {
   try {
     const url = new URL(src);
-    return (url.hostname === "localhost" || url.hostname === "127.0.0.1") && url.port === "9000";
+    return url.origin === rustfsPublicOrigin;
   } catch {
     return false;
   }
@@ -82,7 +73,7 @@ export function SmartImage({
           alt={alt}
           fill
           sizes={sizes}
-          unoptimized={isLocalRustfsImage(src ?? "")}
+          unoptimized={isRustfsImage(src ?? "")}
           priority={preload ? undefined : priority}
           preload={preload}
           loading={preload ? undefined : priority ? "eager" : "lazy"}

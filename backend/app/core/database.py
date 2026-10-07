@@ -4,6 +4,7 @@ import os
 import secrets
 import time
 from collections.abc import AsyncIterator
+from pathlib import Path
 from uuid import UUID
 
 from dotenv import load_dotenv
@@ -14,6 +15,7 @@ from sqlalchemy import (
     Column,
     Date,
     DateTime,
+    Enum as SAEnum,
     ForeignKey,
     Integer,
     MetaData,
@@ -25,15 +27,18 @@ from sqlalchemy import (
     Uuid,
     text,
 )
-from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import ARRAY, JSONB
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-load_dotenv()
+from app.modules.enquiries.schemas import MessageStatus
 
-DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    "postgresql+asyncpg://postgres:postgres@localhost:5432/masala_db",
-)
+_repository_root = Path(__file__).resolve().parents[3]
+load_dotenv(_repository_root / ".env", override=False)
+load_dotenv(_repository_root / "backend" / ".env", override=False)
+
+DATABASE_URL = os.getenv("DATABASE_URL")
+if not DATABASE_URL:
+    raise RuntimeError("DATABASE_URL must be configured in the backend environment.")
 
 engine = create_async_engine(DATABASE_URL, pool_pre_ping=True)
 session_factory = async_sessionmaker(engine, expire_on_commit=False)
@@ -61,9 +66,7 @@ categories_table = Table(
     Column("slug", String),
     Column("type", String),
     Column("description", Text),
-    Column("parent_id", Uuid, ForeignKey("categories.id")),
-    Column("seo_title", String),
-    Column("seo_description", Text),
+    Column("image_key", String),
     Column("created_at", DateTime),
 )
 products_table = Table(
@@ -73,16 +76,10 @@ products_table = Table(
     Column("name", String),
     Column("slug", String),
     Column("description", Text),
-    Column("ingredients", ARRAY(String)),
-    Column("price", Numeric),
-    Column("mrp", Numeric),
-    Column("discount_pct", Integer),
     Column("spice_level", String),
     Column("status", String),
     Column("categories", ARRAY(String)),
     Column("images", ARRAY(String)),
-    Column("dish_type", String),
-    Column("is_veg", Boolean),
     Column("created_at", DateTime),
     Column("updated_at", DateTime),
 )
@@ -104,6 +101,7 @@ combos_table = Table(
     Column("is_veg", Boolean),
     Column("created_at", DateTime),
     Column("updated_at", DateTime),
+    Column("catalog_products", JSONB, nullable=False, server_default=text("'[]'::jsonb")),
 )
 variants_table = Table(
     "product_variants",
@@ -118,17 +116,6 @@ variants_table = Table(
     Column("sku", String),
     Column("batch_no", String),
 )
-combo_catalog_products_table = Table(
-    "combo_catalog_products",
-    metadata,
-    Column("id", Uuid, primary_key=True, default=_uuid7_default),
-    Column("combo_id", Uuid, ForeignKey("combos.id", ondelete="CASCADE"), nullable=False),
-    Column("product_id", Uuid, ForeignKey("products.id", ondelete="RESTRICT"), nullable=False),
-    Column("variant_id", Uuid, ForeignKey("product_variants.id", ondelete="RESTRICT"), nullable=False),
-    Column("quantity", Integer, nullable=False),
-    Column("sort_order", Integer, nullable=False, default=0),
-    UniqueConstraint("combo_id", "variant_id", name="uq_combo_catalog_variant"),
-)
 admin_users_table = Table(
     "admin_users",
     metadata,
@@ -137,20 +124,6 @@ admin_users_table = Table(
     Column("password_hash", String),
     Column("is_active", Boolean),
     Column("created_at", DateTime(timezone=True)),
-)
-notification_settings_table = Table(
-    "notification_settings",
-    metadata,
-    Column("id", Uuid, primary_key=True, default=_uuid7_default),
-    Column("sms_enabled", Boolean),
-    Column("email_enabled", Boolean),
-    Column("sms_api_key", Text),
-    Column("sms_account_sid", Text),
-    Column("sms_sender_phone", String),
-    Column("email_api_key", Text),
-    Column("email_sender_name", String),
-    Column("email_sender_email", String),
-    Column("updated_at", DateTime),
 )
 hero_images_table = Table(
     "hero_images",
@@ -175,6 +148,56 @@ homepage_settings_table = Table(
     Column("id", Uuid, primary_key=True, default=_uuid7_default, server_default=text("uuidv7()")),
     Column("content", JSON, nullable=False),
     Column("updated_at", DateTime(timezone=True), nullable=False),
+)
+notification_settings_table = Table(
+    "notification_settings",
+    metadata,
+    Column("id", Integer, primary_key=True),
+    Column("sms_enabled", Boolean, nullable=False, server_default=text("false")),
+    Column("sms_account_sid", Text),
+    Column("sms_auth_token", Text),
+    Column("sms_sender_phone", String(32)),
+    Column("email_enabled", Boolean, nullable=False, server_default=text("false")),
+    Column("email_api_key", Text),
+    Column("email_sender_name", String(255)),
+    Column("email_sender_email", String(320)),
+    CheckConstraint("id = 1", name="ck_notification_settings_singleton"),
+)
+guest_sessions_table = Table(
+    "guest_sessions",
+    metadata,
+    Column("guest_id", Uuid, primary_key=True, default=_uuid7_default),
+    Column("created_at", DateTime(timezone=True), nullable=False),
+    Column("last_seen_at", DateTime(timezone=True), nullable=False),
+)
+guest_cart_items_table = Table(
+    "guest_cart_items",
+    metadata,
+    Column(
+        "guest_id",
+        Uuid,
+        ForeignKey("guest_sessions.guest_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("product_id", Uuid, primary_key=True),
+    Column("variant_key", Uuid, primary_key=True),
+    Column("variant_id", Uuid),
+    Column("is_combo", Boolean, nullable=False, server_default=text("false")),
+    Column("qty", Integer, nullable=False),
+    Column("position", Integer, nullable=False, server_default=text("0")),
+    CheckConstraint("qty BETWEEN 1 AND 20", name="ck_guest_cart_items_qty"),
+)
+guest_watchlist_items_table = Table(
+    "guest_watchlist_items",
+    metadata,
+    Column(
+        "guest_id",
+        Uuid,
+        ForeignKey("guest_sessions.guest_id", ondelete="CASCADE"),
+        primary_key=True,
+    ),
+    Column("product_id", Uuid, primary_key=True),
+    Column("position", Integer, nullable=False, server_default=text("0")),
 )
 orders_table = Table(
     "orders",
@@ -205,6 +228,7 @@ orders_table = Table(
     Column("payment_note", Text),
     Column("tracking_id", String),
     Column("courier_partner", String),
+    Column("guest_id", Uuid, ForeignKey("guest_sessions.guest_id", ondelete="SET NULL")),
 )
 order_items_table = Table(
     "order_items",
@@ -297,15 +321,20 @@ messages_table = Table(
     Column("name", String(160), nullable=False),
     Column("email", String(254), nullable=False),
     Column("phone", String(24)),
-    Column("company_name", String(255)),
     Column("subject", String(80), nullable=False),
     Column("message", Text, nullable=False),
-    Column("source", String(32), nullable=False),
-    Column("details", JSON, nullable=False, default=dict, server_default=text("'{}'")),
-    Column("status", String(20), nullable=False, default="new", server_default="new"),
+    Column(
+        "status",
+        SAEnum(
+            MessageStatus,
+            name="message_status",
+            values_callable=lambda enum: [item.value for item in enum],
+        ),
+        nullable=False,
+        default=MessageStatus.NEW,
+        server_default=MessageStatus.NEW.value,
+    ),
     Column("created_at", DateTime(timezone=True), nullable=False, server_default=text("now()")),
-    CheckConstraint("status IN ('new', 'read')", name="ck_messages_status"),
-    CheckConstraint("source IN ('contact', 'bulk_order')", name="ck_messages_source"),
 )
 
 

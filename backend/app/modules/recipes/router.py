@@ -16,7 +16,7 @@ router = APIRouter(prefix="/api/recipes", tags=["recipes"])
 
 async def _recipe_response(recipe: dict[str, Any]) -> dict[str, Any]:
     image_reference = recipe["hero_image_url"]
-    if image_reference.startswith("homepage/"):
+    if image_reference.startswith(("recipes/", "homepage/", "masalafolder/recipes/")):
         recipe["hero_image_key"] = image_reference
         if not await asyncio.to_thread(object_exists, image_reference):
             raise HTTPException(
@@ -24,6 +24,8 @@ async def _recipe_response(recipe: dict[str, Any]) -> dict[str, Any]:
                 detail="A recipe photo is missing from RustFS. Upload that photo again.",
             )
         recipe["hero_image_url"] = await asyncio.to_thread(get_file_url, image_reference)
+    else:
+        recipe["hero_image_url"] = ""
     return recipe
 
 

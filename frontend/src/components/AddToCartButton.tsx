@@ -34,7 +34,7 @@ export function AddToCartButton({
       : 0
     : null;
   const availableStock = bundleStock ?? selected?.stock_qty ?? 20;
-  const inStock = availableStock > 0;
+  const inStock = availableStock > 0 && (product.is_combo || selected !== null);
   const maxQty = Math.max(1, Math.min(availableStock, 20));
 
   const handleAdd = () => {
@@ -48,11 +48,10 @@ export function AddToCartButton({
         slug: product.slug,
         category: product.categories[0] ?? "all",
         categories: product.categories,
-        dishType: product.dish_type,
         image: product.images[0]?.url ?? "",
         packSize: selected?.pack_size ?? "Standard",
-        price: selected?.price ?? product.price,
-        mrp: selected?.mrp ?? product.mrp,
+        price: selected?.price ?? product.price ?? 0,
+        mrp: selected?.mrp ?? product.mrp ?? 0,
         maxQty,
       },
       quantity,

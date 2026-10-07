@@ -1,7 +1,7 @@
 "use client";
 
 import axios from "axios";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
@@ -17,6 +17,7 @@ import {
 } from "@/lib/shipping";
 import { calculatePromo, validatePromoCode } from "@/lib/promos";
 import { apiClient, getApiErrorMessage } from "@/lib/http";
+import { syncGuestCart } from "@/lib/guest-api";
 import {
   FREE_SHIPPING_THRESHOLD,
   selectShipping,
@@ -26,7 +27,6 @@ import {
   type CartLine,
 } from "@/store/cart";
 import { useUIStore } from "@/store/ui";
-import { SmartImage } from "@/components/ui/SmartImage";
 import {
   ArrowRightIcon,
   CheckCircleIcon,
@@ -198,6 +198,23 @@ export function CheckoutForm({ onPlaced }: Props) {
 
   const [placed, setPlaced] = useState<CheckoutReceipt | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  const [successDialogOpen, setSuccessDialogOpen] = useState(false);
+  const successDialogRef = useRef<HTMLElement>(null);
+
+  useEffect(() => {
+    if (!placed || !successDialogOpen) return;
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSuccessDialogOpen(false);
+    };
+    document.body.style.overflow = "hidden";
+    document.addEventListener("keydown", handleKeyDown);
+    successDialogRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [placed, successDialogOpen]);
 
   useEffect(() => {
     if (!promoCode || lines.length === 0) return;
@@ -265,6 +282,17 @@ export function CheckoutForm({ onPlaced }: Props) {
 
     try {
       let data: OrderResponse;
+      let checkoutLines: CartLine[];
+      try {
+        checkoutLines = await syncGuestCart(lines);
+      } catch (error) {
+        throw new Error(
+          getApiErrorMessage(
+            error,
+            "Your bag could not be verified. Please review it and try again.",
+          ),
+        );
+      }
       try {
         const response = await apiClient.post<OrderResponse>("/api/orders", {
           customer_name: values.customer_name,
@@ -277,7 +305,7 @@ export function CheckoutForm({ onPlaced }: Props) {
           country_code: values.country_code,
           delivery_mode: values.delivery_mode,
           coupon_code: promoCode,
-          items: lines.map((line) => ({
+          items: checkoutLines.map((line) => ({
             product_id: line.id,
             variant_id: line.variantId,
             qty: line.qty,
@@ -299,16 +327,30 @@ export function CheckoutForm({ onPlaced }: Props) {
 
       const confirmedMode = data.delivery_mode ?? values.delivery_mode;
       const confirmedCountry = data.country_code ?? values.country_code;
+      const checkoutDiscount = data.discount_amount ?? discount;
+      const checkoutSubtotal = selectSubtotal(checkoutLines);
+      const checkoutShipping = selectShipping(
+        checkoutLines,
+        confirmedMode,
+        confirmedCountry,
+        checkoutDiscount,
+      );
+      const checkoutTotal = selectTotal(
+        checkoutLines,
+        confirmedMode,
+        confirmedCountry,
+        checkoutDiscount,
+      );
       const receipt: CheckoutReceipt = {
-        lines,
+        lines: checkoutLines,
         orderNumber: typeof data.order_number === "string" ? data.order_number : null,
         emailConfirmationStatus: data.email_confirmation_status ?? "failed",
         smsConfirmationStatus: data.sms_confirmation_status ?? "failed",
-        subtotal: data.subtotal ?? subtotal,
-        shipping: data.shipping_amount ?? shipping,
-        discount: data.discount_amount ?? discount,
+        subtotal: data.subtotal ?? checkoutSubtotal,
+        shipping: data.shipping_amount ?? checkoutShipping,
+        discount: checkoutDiscount,
         promoCode: data.coupon_code ?? promoCode,
-        total: data.total ?? total,
+        total: data.total ?? checkoutTotal,
         deliveryMode: confirmedMode,
         countryCode: confirmedCountry,
         countryName: confirmedMode === "domestic" ? "India" : getShippingDestination(confirmedCountry).name,
@@ -316,6 +358,7 @@ export function CheckoutForm({ onPlaced }: Props) {
       };
 
       setPlaced(receipt);
+      setSuccessDialogOpen(true);
       onPlaced(receipt);
       clear();
       showToast("Order placed — keep your order reference for tracking.", "success");
@@ -330,112 +373,90 @@ export function CheckoutForm({ onPlaced }: Props) {
   };
 
   /* ------------------------------ Success ------------------------------ */
+  if (placed && successDialogOpen) {
+    return (
+      <div
+        className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-ink-950/60 p-4 backdrop-blur-sm animate-fade-in sm:p-6"
+        role="presentation"
+      >
+        <section
+          ref={successDialogRef}
+          aria-labelledby="order-success-title"
+          aria-modal="true"
+          className="my-auto w-full max-w-lg overflow-hidden rounded-4xl border border-white/70 bg-white shadow-2xl animate-pop"
+          role="dialog"
+          tabIndex={-1}
+        >
+          <div className="bg-gradient-to-br from-cardamom-50 via-white to-paper-100 px-6 pb-6 pt-8 text-center sm:px-10 sm:pt-10">
+            <div className="mx-auto grid size-24 place-items-center rounded-full bg-cardamom-100 shadow-lg shadow-cardamom-700/10">
+              <svg className="size-16 text-cardamom-600" viewBox="0 0 64 64" fill="none" aria-hidden="true">
+                <circle className="success-check-ring" cx="32" cy="32" r="27" stroke="currentColor" strokeWidth="4" />
+                <path className="success-check-mark" d="m19 33 9 9 18-20" stroke="currentColor" strokeWidth="4.5" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+            </div>
+            <p className="eyebrow mt-6 text-cardamom-700">Order confirmed</p>
+            <h2 id="order-success-title" className="mt-2 font-display text-3xl font-semibold text-ink-950 sm:text-4xl">
+              Thank you for your order!
+            </h2>
+            <p className="mx-auto mt-3 max-w-sm text-sm leading-relaxed text-ink-600">
+              We&apos;ve received your order and our team will contact you to confirm payment and dispatch.
+            </p>
+
+            {placed.orderNumber ? (
+              <div className="mx-auto mt-6 max-w-sm rounded-2xl border border-cardamom-200 bg-white/90 px-4 py-3">
+                <p className="text-[0.68rem] font-semibold tracking-[0.16em] text-ink-500 uppercase">Order reference</p>
+                <p className="mt-1 font-display text-2xl font-semibold tracking-wide text-ink-950">{placed.orderNumber}</p>
+              </div>
+            ) : null}
+
+            <div className="mx-auto mt-5 max-w-sm rounded-2xl border border-paper-200 bg-white/80 p-4 text-left">
+              <p className="text-sm font-semibold text-ink-900">Need help with your order?</p>
+              <p className="mt-1 text-sm text-ink-600">For further queries, contact us at:</p>
+              <a
+                className="mt-2 inline-flex items-center gap-2 text-lg font-bold text-masala-700 transition hover:text-masala-900"
+                href="tel:+919876543210"
+              >
+                +91 98765 43210
+                <ArrowRightIcon className="size-4 -rotate-45" />
+              </a>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-3 px-6 pb-7 sm:flex-row sm:justify-center sm:px-10">
+            <Link href="/order-status" className="btn btn-primary justify-center">
+              Track your order
+              <ArrowRightIcon className="size-4" />
+            </Link>
+            <a href="/search/" className="btn btn-secondary justify-center">
+              Continue shopping
+            </a>
+          </div>
+        </section>
+      </div>
+    );
+  }
+
   if (placed) {
     return (
       <div role="status" className="card p-6 sm:p-8">
         <span className="grid size-14 place-items-center rounded-full bg-cardamom-100 text-cardamom-700">
           <CheckCircleIcon className="size-7" />
         </span>
-
         <p className="eyebrow mt-5">Order placed</p>
         <h2 className="mt-2 font-display text-2xl font-semibold text-ink-950 sm:text-3xl">
           Thank you — we&apos;ve received your order.
         </h2>
-
-        {placed.orderNumber ? (
-          <div className="mt-4 rounded-2xl border border-saffron-200 bg-saffron-50 p-4">
-            <p className="text-xs font-semibold tracking-wide text-ink-600 uppercase">Order reference</p>
-            <p className="mt-1 font-display text-2xl font-semibold text-ink-950">{placed.orderNumber}</p>
-            <p className="mt-2 text-xs leading-relaxed text-ink-600">
-              Keep this reference for tracking.{" "}
-              {placed.emailConfirmationStatus === "sent"
-                ? "An order confirmation was sent to your email address."
-                : placed.emailConfirmationStatus === "disabled"
-                  ? "Email confirmations are currently disabled; keep this reference to track your order."
-                  : "We received your order, but could not send the confirmation email. Keep this reference to track your order."}
-              {" "}
-              {placed.smsConfirmationStatus === "sent"
-                ? "An SMS confirmation was also sent."
-                : placed.smsConfirmationStatus === "failed"
-                  ? "We could not send the SMS confirmation."
-                  : ""}
-            </p>
-          </div>
-        ) : null}
-
-        <div className="mt-5 flex items-start gap-3 rounded-2xl border border-paper-200 bg-paper-50 p-4">
-          <InfoIcon className="mt-0.5 size-5 shrink-0 text-masala-600" />
-          <p className="text-sm leading-relaxed text-ink-600">
-            No payment was collected. The admin will review the order and contact you on the
-            required phone number to confirm payment, address and dispatch before dispatch.
-          </p>
-        </div>
-
-        <div className="mt-6 rounded-2xl border border-paper-200 bg-paper-50 p-5">
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <p className="eyebrow">What you ordered</p>
-            <span className="chip">
-              {placed.deliveryMode === "domestic" ? "Domestic" : "Flying Abroad"} · {placed.countryName}
-            </span>
-          </div>
-          <ul className="mt-3 divide-y divide-paper-200">
-            {placed.lines.map((line) => (
-              <li key={line.key} className="flex items-center gap-3 py-2.5 first:pt-0">
-                <SmartImage
-                  src={line.image}
-                  alt={line.name}
-                  aspect="aspect-square"
-                  sizes="44px"
-                  wrapperClassName="size-11 shrink-0 rounded-lg border border-paper-200"
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-semibold text-ink-950">{line.name}</p>
-                  <p className="mt-0.5 text-xs text-ink-500">
-                    {line.packSize} · Qty {line.qty}
-                  </p>
-                </div>
-                <p className="text-sm font-semibold tabular-nums text-ink-950">
-                  {formatINR(line.price * line.qty)}
-                </p>
-              </li>
-            ))}
-          </ul>
-
-          <div className="mt-3 space-y-1.5 border-t border-paper-200 pt-3 text-sm">
-            <div className="flex items-center justify-between">
-              <span className="text-ink-600">Subtotal</span>
-              <span className="font-semibold text-ink-950">{formatINR(placed.subtotal)}</span>
-            </div>
-            {placed.discount > 0 ? (
-              <div className="flex items-center justify-between">
-                <span className="text-ink-600">Promo discount {placed.promoCode ? `(${placed.promoCode})` : ""}</span>
-                <span className="font-semibold text-cardamom-700">−{formatINR(placed.discount)}</span>
-              </div>
-            ) : null}
-            <div className="flex items-center justify-between">
-              <span className="text-ink-600">Shipping</span>
-              <span className={placed.shipping === 0 ? "font-semibold text-cardamom-600" : "font-semibold"}>
-                {placed.shipping === 0 ? "Free" : formatINR(placed.shipping)}
-              </span>
-            </div>
-            <div className="flex items-center justify-between border-t border-paper-200 pt-2">
-              <span className="font-semibold text-ink-900">Total</span>
-              <span className="font-display text-lg font-semibold text-ink-950">
-                {formatINR(placed.total)}
-              </span>
-            </div>
-          </div>
-        </div>
-
-        <div className="mt-6 flex flex-wrap gap-3">
-          <Link href="/order-status" className="btn btn-primary">
-            Track your order
-            <ArrowRightIcon className="size-4" />
-          </Link>
-          <Link href="/collections/breakfast-masalas" className="btn btn-secondary">
-            Continue shopping
-          </Link>
-        </div>
+        <p className="mt-4 text-sm leading-relaxed text-ink-600">
+          For further queries, call{" "}
+          <a className="font-semibold text-masala-700 underline" href="tel:+919876543210">
+            +91 98765 43210
+          </a>
+          .
+        </p>
+        <Link href="/order-status" className="btn btn-primary mt-6">
+          Track your order
+          <ArrowRightIcon className="size-4" />
+        </Link>
       </div>
     );
   }

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+from collections import Counter
 from datetime import datetime, timezone
 from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import String, insert, select, text
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy import String, delete, insert, select, text
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,6 +22,7 @@ from app.common.phone import (
 from app.core.database import (
     coupons_table,
     get_db,
+    guest_cart_items_table,
     order_history_table,
     order_items_table,
     orders_table,
@@ -31,7 +33,7 @@ from app.modules.coupons.service import (
     calculate_managed_coupon,
 )
 from app.modules.orders.catalog import CatalogValidationError, QuotedOrderItem, quote_order_items
-from app.modules.orders.schemas import Order, OrderCreateRequest
+from app.modules.orders.schemas import Order, OrderCreateRequest, OrderItemInput
 from app.modules.orders.shipping import (
     INTERNATIONAL_PACKAGING_NOTE,
     calculate_shipping,
@@ -84,10 +86,40 @@ def get_shipping_options() -> dict[str, Any]:
 @router.post("", response_model=Order)
 async def create_order(
     payload: OrderCreateRequest,
+    request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    cart_result = await db.execute(
+        select(
+            guest_cart_items_table.c.product_id,
+            guest_cart_items_table.c.variant_id,
+            guest_cart_items_table.c.qty,
+        )
+        .where(guest_cart_items_table.c.guest_id == request.state.guest_id)
+        .order_by(guest_cart_items_table.c.position)
+    )
+    cart_items = [
+        OrderItemInput(
+            product_id=row["product_id"],
+            variant_id=row["variant_id"],
+            qty=row["qty"],
+        )
+        for row in cart_result.mappings()
+    ]
+    if not cart_items:
+        raise HTTPException(status_code=422, detail="Your bag is empty or could not be verified.")
+    if Counter(
+        (item.product_id, item.variant_id, item.qty) for item in payload.items
+    ) != Counter(
+        (item.product_id, item.variant_id, item.qty) for item in cart_items
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail="Your bag changed. Refresh it and review your items before placing the order.",
+        )
+
     try:
-        items = await quote_order_items(db, payload.items)
+        items = await quote_order_items(db, cart_items)
     except CatalogValidationError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -186,6 +218,7 @@ async def create_order(
             city=payload.city.strip(),
             state=payload.state.strip() if payload.state else None,
             postal_code=payload.postal_code.strip(),
+            guest_id=request.state.guest_id,
         ).returning(orders_table.c.id)
     )).scalar_one()
 
@@ -215,6 +248,11 @@ async def create_order(
         note="Order placed; awaiting admin confirmation.",
     ))
 
+    await db.execute(
+        delete(guest_cart_items_table).where(
+            guest_cart_items_table.c.guest_id == request.state.guest_id
+        )
+    )
     await db.commit()
 
     order = {
@@ -265,7 +303,7 @@ async def create_order(
         ],
     }
 
-    order["email_confirmation_status"] = await send_order_confirmation_email(db, order)
+    order["email_confirmation_status"] = await send_order_confirmation_email(order)
     return order
 
 

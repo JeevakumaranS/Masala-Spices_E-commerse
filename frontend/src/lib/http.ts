@@ -1,10 +1,8 @@
 import axios from "axios";
 
-const serverApiBaseUrl =
-  process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
-
 export const apiClient = axios.create({
-  baseURL: typeof window === "undefined" ? serverApiBaseUrl : "",
+  baseURL: typeof window === "undefined" ? process.env.BACKEND_API_URL : "",
+  withCredentials: true,
   headers: {
     Accept: "application/json",
   },

@@ -10,7 +10,6 @@ from sqlalchemy import func, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import (
-    combo_catalog_products_table,
     combos_table,
     get_db,
     products_table,
@@ -30,15 +29,13 @@ router = APIRouter(prefix="/api/products", tags=["products"])
 logger = logging.getLogger(__name__)
 
 
-@router.get("", response_model=PaginatedProducts)
+@router.get("", response_model=PaginatedProducts, response_model_exclude_none=True)
 async def list_products(
     category: str | None = Query(default=None),
     spice_level: str | None = Query(default=None),
-    dish_type: str | None = Query(default=None),
     min_price: float | None = Query(default=None, ge=0),
     max_price: float | None = Query(default=None, ge=0),
     pack_size: str | None = Query(default=None),
-    is_veg: bool | None = Query(default=None),
     search: str | None = Query(default=None),
     page: int = 1,
     page_size: int = 12,
@@ -64,14 +61,31 @@ async def list_products(
             filtered = [item for item in filtered if category in (item.get("categories") or [])]
     if spice_level:
         filtered = [item for item in filtered if item["spice_level"].lower() == spice_level.lower()]
-    if dish_type:
-        filtered = [item for item in filtered if (item.get("dish_type") or "").lower() == dish_type.lower()]
-    if min_price is not None:
-        filtered = [item for item in filtered if float(item["price"]) >= min_price]
-    if max_price is not None:
-        filtered = [item for item in filtered if float(item["price"]) <= max_price]
-    if is_veg is not None:
-        filtered = [item for item in filtered if item.get("is_veg", True) == is_veg]
+    if min_price is not None or max_price is not None:
+        regular_ids = [item["id"] for item in filtered if not item["is_combo"]]
+        variant_prices: dict[UUID, list[float]] = {}
+        if regular_ids:
+            result = await db.execute(
+                select(variants_table.c.product_id, variants_table.c.price)
+                .where(variants_table.c.product_id.in_(regular_ids))
+                .order_by(variants_table.c.price)
+            )
+            for row in result.mappings():
+                variant_prices.setdefault(row["product_id"], []).append(float(row["price"]))
+
+        def in_price_range(item: dict[str, Any]) -> bool:
+            prices = (
+                [float(item["price"])]
+                if item["is_combo"]
+                else variant_prices.get(item["id"], [])
+            )
+            return any(
+                (min_price is None or price >= min_price)
+                and (max_price is None or price <= max_price)
+                for price in prices
+            )
+
+        filtered = [item for item in filtered if in_price_range(item)]
     if pack_size:
         variants = await db.execute(
             select(variants_table.c.product_id).where(variants_table.c.pack_size.ilike(f"%{pack_size}%"))
@@ -83,8 +97,8 @@ async def list_products(
         filtered = [
             item for item in filtered
             if needle in " ".join([
-                item["name"], item["description"], item.get("dish_type") or "",
-                *(item.get("categories") or []), *(item.get("ingredients") or []),
+                item["name"], item["description"], item.get("spice_level") or "",
+                *(item.get("categories") or []),
             ]).lower()
         ]
     start = (page - 1) * page_size
@@ -98,7 +112,7 @@ async def list_products(
     }
 
 
-@router.get("/{slug}", response_model=Product)
+@router.get("/{slug}", response_model=Product, response_model_exclude_none=True)
 async def get_product(slug: str, db: AsyncSession = Depends(get_db)) -> dict[str, Any]:
     result = await db.execute(select(products_table).where(products_table.c.slug == slug))
     product = result.mappings().first()
@@ -118,7 +132,9 @@ async def hydrate_products(db: AsyncSession, products: list[dict[str, Any]]) -> 
         return []
     ids = [item["id"] for item in products if not item.get("is_combo")]
     result = await db.execute(
-        select(variants_table).where(variants_table.c.product_id.in_(ids))
+    select(variants_table)
+    .where(variants_table.c.product_id.in_(ids))
+    .order_by(variants_table.c.price, variants_table.c.pack_size)
     ) if ids else None
     variants_by_product: dict[str, list[dict[str, Any]]] = {}
     if result is not None:
@@ -131,51 +147,76 @@ async def hydrate_products(db: AsyncSession, products: list[dict[str, Any]]) -> 
     combo_ids = [item["id"] for item in products if item.get("is_combo")]
     combo_catalog_products_by_id: dict[UUID, list[dict[str, Any]]] = {}
     if combo_ids:
-        catalog_result = await db.execute(
-            select(
-                combo_catalog_products_table.c.id,
-                combo_catalog_products_table.c.combo_id,
-                combo_catalog_products_table.c.product_id,
-                combo_catalog_products_table.c.variant_id,
-                combo_catalog_products_table.c.quantity,
-                products_table.c.name,
-                variants_table.c.sku,
-                variants_table.c.pack_size,
-                variants_table.c.price,
-                variants_table.c.mrp,
-                variants_table.c.stock_qty,
+        components_by_combo = {
+            item["id"]: item.get("catalog_products") or []
+            for item in products
+            if item.get("is_combo")
+        }
+        variant_ids = {
+            UUID(component["variant_id"])
+            for components in components_by_combo.values()
+            for component in components
+        }
+        catalog_rows_by_variant: dict[UUID, dict[str, Any]] = {}
+        if variant_ids:
+            catalog_result = await db.execute(
+                select(
+                    variants_table.c.id,
+                    variants_table.c.product_id,
+                    products_table.c.name,
+                    variants_table.c.sku,
+                    variants_table.c.pack_size,
+                    variants_table.c.price,
+                    variants_table.c.mrp,
+                    variants_table.c.stock_qty,
+                )
+                .join(products_table, products_table.c.id == variants_table.c.product_id)
+                .where(variants_table.c.id.in_(variant_ids))
             )
-            .join(products_table, products_table.c.id == combo_catalog_products_table.c.product_id)
-            .join(variants_table, variants_table.c.id == combo_catalog_products_table.c.variant_id)
-            .where(combo_catalog_products_table.c.combo_id.in_(combo_ids))
-            .order_by(combo_catalog_products_table.c.sort_order)
-        )
-        for row in catalog_result.mappings():
-            combo_catalog_products_by_id.setdefault(row["combo_id"], []).append({
-                "id": row["id"],
-                "product_id": row["product_id"],
-                "variant_id": row["variant_id"],
-                "name": row["name"],
-                "sku": row["sku"],
-                "quantity": int(row["quantity"]),
-                "pack_size": row["pack_size"],
-                "price": float(row["price"]),
-                "mrp": float(row["mrp"]),
-                "stock_qty": int(row["stock_qty"]),
-            })
+            catalog_rows_by_variant = {
+                row["id"]: dict(row) for row in catalog_result.mappings()
+            }
+        for combo_id, components in components_by_combo.items():
+            for component in components:
+                variant_id = UUID(component["variant_id"])
+                row = catalog_rows_by_variant.get(variant_id)
+                if row is None or str(row["product_id"]) != component["product_id"]:
+                    continue
+                combo_catalog_products_by_id.setdefault(combo_id, []).append({
+                    "id": UUID(component["id"]),
+                    "product_id": row["product_id"],
+                    "variant_id": variant_id,
+                    "name": row["name"],
+                    "sku": row["sku"],
+                    "quantity": int(component["quantity"]),
+                    "pack_size": row["pack_size"],
+                    "price": float(row["price"]),
+                    "mrp": float(row["mrp"]),
+                    "stock_qty": int(row["stock_qty"]),
+                })
     for product in products:
         product["is_combo"] = bool(product.get("is_combo", False))
         product["variants"] = variants_by_product.get(product["id"], [])
         product["combo_catalog_products"] = combo_catalog_products_by_id.get(product["id"], [])
-        product["ingredients"] = product.get("ingredients") or []
         product["categories"] = product.get("categories") or []
         image_references = product.get("images") or []
         product["images"] = []
         for image in image_references:
+            if not isinstance(image, str):
+                logger.warning(
+                    "Skipping non-string product image reference.",
+                    extra={"product_id": str(product["id"]), "image_type": type(image).__name__},
+                )
+                continue
             object_key = get_object_key(image)
+            if not object_key:
+                logger.warning(
+                    "Skipping product image that is not stored in RustFS.",
+                    extra={"product_id": str(product["id"])},
+                )
+                continue
             if (
-                object_key
-                and image != object_key
+                image != object_key
                 and not await asyncio.to_thread(object_exists, object_key)
             ):
                 logger.warning(
@@ -186,7 +227,7 @@ async def hydrate_products(db: AsyncSession, products: list[dict[str, Any]]) -> 
             sort_order = len(product["images"])
             product["images"].append({
                 "id": f"{product['id']}:{sort_order}",
-                "url": await asyncio.to_thread(get_file_url, object_key) if object_key else image,
+                "url": await asyncio.to_thread(get_file_url, object_key),
                 "object_key": object_key,
                 "alt_text": product["name"],
                 "sort_order": sort_order,

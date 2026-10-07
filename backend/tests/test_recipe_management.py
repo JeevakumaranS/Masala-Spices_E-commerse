@@ -18,7 +18,7 @@ def _recipe_payload() -> dict[str, object]:
         "dish_type": " Main Course ",
         "ingredients": [" Toor dal ", "", "Sambar masala"],
         "steps": [" Cook dal ", "Add masala"],
-        "hero_image_url": "homepage/photo.jpg",
+        "hero_image_key": "recipes/photo.jpg",
         "video_url": " ",
     }
 
@@ -39,7 +39,8 @@ def test_recipe_input_normalizes_slug_and_list_fields() -> None:
         ("cook_time_minutes", 0),
         ("ingredients", ["", "  "]),
         ("steps", []),
-        ("hero_image_url", " "),
+        ("hero_image_key", " "),
+        ("hero_image_key", "https://images.example.test/photo.jpg"),
     ],
 )
 def test_recipe_input_rejects_invalid_required_details(field: str, value: object) -> None:

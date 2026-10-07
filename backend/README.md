@@ -13,18 +13,19 @@ backend/
 │   ├── modules/
 │   │   ├── admin/                # authentication and protected admin operations
 │   │   ├── analytics/            # analytics endpoints and schemas
-│   │   ├── blog/                 # blog endpoints and seed data
-│   │   ├── categories/           # category endpoints, schemas, seed data
+│   │   ├── blog/                 # blog endpoints and schemas
+│   │   ├── categories/           # category endpoints and schemas
 │   │   ├── coupons/              # coupon endpoints
 │   │   ├── enquiries/            # enquiry endpoints
+│   │   ├── guests/               # anonymous cart and watchlist persistence
 │   │   ├── health/               # health-check endpoint
 │   │   ├── orders/               # order endpoints, schemas, quote logic
-│   │   ├── products/             # product endpoints, schemas, seed data
-│   │   ├── recipes/              # recipe endpoints, schemas, seed data
+│   │   ├── products/             # product endpoints and schemas
+│   │   ├── recipes/              # recipe endpoints and schemas
 │   │   └── stores/               # store-location endpoints
+│   ├── scripts/                  # operational maintenance scripts
 │   └── main.py                   # uvicorn entry point
 ├── alembic/                      # database migrations
-├── scripts/                      # development and maintenance scripts
 ├── requirements.txt
 └── requirements-dev.txt          # pytest and backend test dependencies
 ```
@@ -34,8 +35,7 @@ backend/
 1. Create `app/modules/<feature>/`.
 2. Add `router.py` for the module's `APIRouter` and `schemas.py` for its
    request/response models.
-3. Add development data in `data.py` when the module needs seed data.
-4. Register the router in `app/api/router.py`.
+3. Register the router in `app/api/router.py`.
 
 Use Python 3.12, matching `Dockerfile`. After activating the virtual environment
 and installing `requirements.txt`, run the application from this directory with:
@@ -86,8 +86,10 @@ coupon, and recipe fields use PostgreSQL `text[]` columns instead of JSON.
 Existing integer keys are migrated to UUIDv7 while remapping their foreign-key
 references, and existing JSON lists are converted in place by the migration.
 
-Admin products support nested variants (pack size, SKU, price, stock, batch and
-expiry), image URL arrays, category tags and product facets. Orders created through
+Admin products store their descriptive details, RustFS image keys, category tags,
+spice level and status. Pack size, price, MRP, SKU, stock, batch and expiry are
+stored per product variant; regular product prices are never stored on the
+`products` row. Orders created through
 the storefront are persisted, reviewed through the admin order routes, and
 retained across restarts. Order references use a sequential `MAS-` prefix and
 exactly five digits (for example, `MAS-00001`); guest tracking checks the
@@ -97,6 +99,16 @@ tracking ID are required before shipping; both appear in guest order tracking.
 Brevo sends a status-specific customer email at order placement and on each
 subsequent status transition. Review submissions are pending moderation by
 default.
+
+Anonymous storefront sessions use an HttpOnly `guest_id` cookie. Cart and
+watchlist contents are persisted against that guest in the database, while
+prices and inventory are refreshed from the catalog and revalidated at
+checkout. `GET` and `PUT /api/cart` exchange the current cart-line array
+(writes accept product IDs, optional variant IDs, and quantities only);
+`GET` and `PUT /api/watchlist` exchange the current product-slug array. To
+remove sessions inactive for more than 90 days that have no orders, schedule
+`python -m app.scripts.cleanup_guests` from the `backend` directory to run
+daily.
 
 Standard catalog entries are stored in `products`; discounted combo listings are
 stored separately in `combos`. A combo can include regular product variants,
@@ -120,25 +132,30 @@ and returns `{ "access_token": "...", "token_type": "bearer" }`.
 The first account can be registered without authentication; subsequent
 registrations require an admin bearer token.
 `GET /api/admin/admins` lists account metadata for authenticated admins.
-`GET` and `PUT /api/admin/integration-settings` manage the SMS/email enable
-switches and provider credentials. Email order confirmations use Brevo's
-transactional email endpoint (`POST /v3/smtp/email`), not the campaigns
-endpoint. Configure a Brevo API v3 key and a sender identity verified in Brevo
-in the admin settings. SMS order confirmations use Twilio Programmable Messaging;
-configure the Account SID, Auth Token, and an SMS-capable sender phone in E.164
-format. Provider credentials are stored as plaintext in the `notification_settings`
-table, so restrict database and backup access appropriately. Migrating from
-older encrypted credentials requires the existing `ADMIN_TOKEN_SECRET` to
-decrypt them; the secret also remains required for admin authentication.
-Credentials are only revealed through the authenticated, non-cacheable reveal
-endpoint. Checkout requires the customer's email. Orders are saved before
-notifications are sent; provider failures are logged and
-reported as per-channel confirmation statuses without discarding the order.
+`GET /api/admin/integration-settings` reports notification configuration
+without returning provider secrets; `PUT /api/admin/integration-settings`
+updates provider credentials, sender details, and enable/disable flags.
+Notification settings are stored in a dedicated database table, with API
+credentials stored in that table. Configure both Twilio SMS and Brevo
+transactional email from Admin → API & notifications. The dashboard masks
+provider credentials by default and allows administrators to reveal them.
+Checkout requires the customer's email. Orders are saved before notifications
+are sent; provider failures are logged and reported as per-channel confirmation
+statuses without discarding the order.
 
 Homepage hero images are uploaded and managed from the admin panel's **Hero
 section**. `GET /api/hero-images` is public and supplies the homepage carousel;
 the authenticated `/api/admin/hero-images` endpoints list, upload, and remove
 slides. Apply the `hero_images` migration before using the section.
+
+New RustFS images are stored in the `masaladb` bucket directly under section
+folders such as `products/{product_id}/...`, `hero/...`,
+`homepage/categories/...`, `blog/...`, and `recipes/...`. Filenames are derived
+from the uploaded filename (or hero alt text); duplicate names receive a
+numbered suffix rather than overwriting an existing image. Set
+`RUSTFS_BUCKET=masaladb` and create that bucket in the RustFS console before
+uploading. Set `RUSTFS_LEGACY_BUCKET=masala-store` to keep existing objects
+readable while new uploads use `masaladb`.
 
 | Method and path | Contract |
 | --- | --- |
@@ -150,7 +167,7 @@ slides. Apply the `hero_images` migration before using the section.
 | `POST /api/admin/products` | Create and return a product. `PUT /api/admin/products/{id}` replaces its fields and variants. `DELETE` returns `204`. |
 | `GET /api/admin/categories` | Category array. `POST /api/admin/categories` creates; `PUT /api/admin/categories/{id}` updates; `DELETE` returns `204`. |
 | `GET /api/admin/orders` | Order array. Optional `status`, `limit`, and `offset` query parameters. `PUT /api/admin/orders/{id}` accepts `status`, optional replacement `items`, `admin_note`, and `payment_note`. Supplying `items` can add/remove lines; the list must contain at least one item. New lines are checked against the current catalog and use its current price/details. Existing lines retain their historical price when `price` is omitted; an explicitly supplied price adjusts that existing line. Totals and shipping are recalculated. Status transitions are `placed` → `under_review` → `confirmed` → `shipped`; moving from under review to confirmed requires a customer-contact note and, for pending offline payments, an offline-arrangement note. |
-| | `GET /api/admin/coupons` | Coupon array, including migration-seeded `FIRST10`, `WELCOME10`, `FESTIVE20`, and `BIRYANI3`. `POST /api/admin/coupons` creates; `PUT /api/admin/coupons/{id}` updates; `DELETE /api/admin/coupons/{id-or-code}` removes. Percentage/fixed promotions accept `percentage`/`fixed_amount` or `discount_value`; activation fields accept both `is_active`/`active`, `active_from`/`starts_at`, and `active_until`/`ends_at`. `first_order_only` is persisted and enforced against previous customer orders. |
+| | `GET /api/admin/coupons` | Coupon array; coupons are created and managed in the admin dashboard. `POST /api/admin/coupons` creates; `PUT /api/admin/coupons/{id}` updates; `DELETE /api/admin/coupons/{id-or-code}` removes. Percentage/fixed promotions accept `percentage`/`fixed_amount` or `discount_value`; activation fields accept both `is_active`/`active`, `active_from`/`starts_at`, and `active_until`/`ends_at`. `first_order_only` is persisted and enforced against previous customer orders. |
 | `GET /api/admin/reviews` | Review array. `PATCH /api/admin/reviews/{id}` accepts `{ "status": "approved" \| "rejected" \| "pending" }`. |
 | `GET /api/admin/analytics/summary` | Analytics summary with revenue/order totals, repeat-purchase rate, top items, and category/region/dish-type sales. `/api/analytics/summary` remains available with the same authorization. |
 

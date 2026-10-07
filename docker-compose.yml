@@ -4,11 +4,11 @@ services:
     container_name: masala-postgres
     restart: unless-stopped
     environment:
-      POSTGRES_DB: masala_db
-      POSTGRES_USER: masala
-      POSTGRES_PASSWORD: masala123
+      POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB in the root .env}
+      POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER in the root .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in the root .env}
     ports:
-      - "5433:5432"
+      - "${POSTGRES_HOST_PORT:?Set POSTGRES_HOST_PORT in the root .env}:5432"
     volumes:
       - postgres_data_pg18:/var/lib/postgresql
     healthcheck:
@@ -25,28 +25,42 @@ services:
     env_file:
       - ./backend/.env
     environment:
-      DATABASE_URL: postgresql+asyncpg://masala:masala123@db:5432/masala_db
+      DATABASE_URL: ${DATABASE_URL:?Set DATABASE_URL in the root .env}
+      RUSTFS_ENDPOINT: ${RUSTFS_CONTAINER_ENDPOINT:?Set RUSTFS_CONTAINER_ENDPOINT in the root .env}
+      RUSTFS_PUBLIC_ENDPOINT: ${RUSTFS_PUBLIC_ENDPOINT:?Set RUSTFS_PUBLIC_ENDPOINT in the root .env}
+      RUSTFS_ACCESS_KEY: ${RUSTFS_ACCESS_KEY:?Set RUSTFS_ACCESS_KEY in the root .env}
+      RUSTFS_SECRET_KEY: ${RUSTFS_SECRET_KEY:?Set RUSTFS_SECRET_KEY in the root .env}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET:?Set RUSTFS_BUCKET in the root .env}
+      RUSTFS_LEGACY_BUCKET: ${RUSTFS_LEGACY_BUCKET:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000}
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-}
     depends_on:
       db:
         condition: service_healthy
-    command: sh -c "alembic upgrade head && python scripts/seed_data.py && uvicorn app.main:app --host 0.0.0.0 --port 8000"
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000"
     ports:
-      - "8000:8000"
+      - "${BACKEND_HOST_PORT:?Set BACKEND_HOST_PORT in the root .env}:8000"
 
   frontend:
     container_name: masala-frontend
     build:
       context: ./frontend
       args:
-        NEXT_PUBLIC_API_URL: http://backend:8000
+        NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL in the root .env}
+        NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT: ${NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT:?Set NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT in the root .env}
+        RUSTFS_BUCKET: ${RUSTFS_BUCKET:?Set RUSTFS_BUCKET in the root .env}
+        RUSTFS_LEGACY_BUCKET: ${RUSTFS_LEGACY_BUCKET:-}
     restart: unless-stopped
     environment:
-      NEXT_PUBLIC_API_URL: http://backend:8000
-      API_PROXY_TARGET: http://backend:8000
+      BACKEND_API_URL: ${BACKEND_API_URL:?Set BACKEND_API_URL in the root .env}
+      NEXT_PUBLIC_SITE_URL: ${NEXT_PUBLIC_SITE_URL:?Set NEXT_PUBLIC_SITE_URL in the root .env}
+      NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT: ${NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT:?Set NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT in the root .env}
+      RUSTFS_BUCKET: ${RUSTFS_BUCKET:?Set RUSTFS_BUCKET in the root .env}
+      RUSTFS_LEGACY_BUCKET: ${RUSTFS_LEGACY_BUCKET:-}
     depends_on:
       - backend
     ports:
-      - "3000:3000"
+      - "${FRONTEND_HOST_PORT:?Set FRONTEND_HOST_PORT in the root .env}:3000"
 
 volumes:
   postgres_data_pg18:

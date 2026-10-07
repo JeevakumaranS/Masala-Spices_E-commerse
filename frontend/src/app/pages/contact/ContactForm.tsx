@@ -1,27 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { useForm } from "react-hook-form";
+import { useForm, useWatch } from "react-hook-form";
 import { zodResolver } from "@hookform/resolvers/zod";
 import { z } from "zod";
 import { apiClient } from "@/lib/http";
 import { ArrowRightIcon, CheckCircleIcon } from "@/components/ui/icons";
 
-const SUBJECTS = ["General", "Order issue", "Wholesale", "Export"] as const;
+const SUBJECTS = ["General", "Order issue", "Bulk orders", "Others"] as const;
 
 const contactSchema = z.object({
   name: z.string().trim().min(2, "Please enter your name."),
   email: z.email("Enter a valid email address so we can reply."),
-  subject: z
-    .string()
-    .min(1, "Choose a subject.")
-    .refine((value) => (SUBJECTS as readonly string[]).includes(value), "Choose a subject."),
+  phone: z.string().trim().min(7, "Enter a valid phone number.").max(24, "Keep the phone number under 24 characters."),
+  subject: z.enum(SUBJECTS, { error: "Choose a subject." }),
+  customSubject: z.string().trim().max(80, "Keep the subject under 80 characters."),
   message: z
     .string()
     .trim()
     .min(10, "Tell us a little more — at least 10 characters.")
     .max(2000, "Keep your message under 2000 characters."),
-});
+}).refine(
+  (values) => values.subject !== "Others" || values.customSubject.length > 0,
+  { message: "Enter a subject.", path: ["customSubject"] },
+);
 
 type ContactValues = z.infer<typeof contactSchema>;
 
@@ -32,13 +34,15 @@ export function ContactForm() {
   const {
     register,
     handleSubmit,
+    control,
     reset,
     formState: { errors, isSubmitting },
   } = useForm<ContactValues>({
     resolver: zodResolver(contactSchema),
-    defaultValues: { name: "", email: "", subject: "", message: "" },
+    defaultValues: { name: "", email: "", phone: "", subject: undefined, customSubject: "", message: "" },
     mode: "onTouched",
   });
+  const subject = useWatch({ control, name: "subject" });
 
   const onSubmit = async (values: ContactValues) => {
     setSubmitError(null);
@@ -49,9 +53,9 @@ export function ContactForm() {
       await apiClient.post("/api/enquiries", {
         name: values.name,
         email: values.email,
-        subject: values.subject,
+        phone: values.phone,
+        subject: values.subject === "Others" ? values.customSubject.trim() : values.subject,
         message: values.message,
-        source: "contact",
       });
       reset();
       setSent(true);
@@ -132,6 +136,27 @@ export function ContactForm() {
       </div>
 
       <div>
+        <label htmlFor="contact-phone" className="field-label">
+          Phone number
+        </label>
+        <input
+          id="contact-phone"
+          type="tel"
+          autoComplete="tel"
+          placeholder="+91 98765 43210"
+          className="input"
+          aria-invalid={Boolean(errors.phone)}
+          aria-describedby={errors.phone ? "contact-phone-error" : undefined}
+          {...register("phone")}
+        />
+        {errors.phone ? (
+          <p id="contact-phone-error" className="field-error">
+            {errors.phone.message}
+          </p>
+        ) : null}
+      </div>
+
+      <div>
         <label htmlFor="contact-subject" className="field-label">
           Subject
         </label>
@@ -145,7 +170,7 @@ export function ContactForm() {
           <option value="">Choose a subject…</option>
           {SUBJECTS.map((subject) => (
             <option key={subject} value={subject}>
-              {subject}
+              {subject === "Bulk orders" ? "Bulk Orders" : subject}
             </option>
           ))}
         </select>
@@ -155,6 +180,29 @@ export function ContactForm() {
           </p>
         ) : null}
       </div>
+
+      {subject === "Others" ? (
+        <div>
+          <label htmlFor="contact-custom-subject" className="field-label">
+            Your subject
+          </label>
+          <input
+            id="contact-custom-subject"
+            type="text"
+            maxLength={80}
+            placeholder="Enter your subject"
+            className="input"
+            aria-invalid={Boolean(errors.customSubject)}
+            aria-describedby={errors.customSubject ? "contact-custom-subject-error" : undefined}
+            {...register("customSubject")}
+          />
+          {errors.customSubject ? (
+            <p id="contact-custom-subject-error" className="field-error">
+              {errors.customSubject.message}
+            </p>
+          ) : null}
+        </div>
+      ) : null}
 
       <div>
         <label htmlFor="contact-message" className="field-label">

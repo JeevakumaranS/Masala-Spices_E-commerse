@@ -30,6 +30,7 @@ export async function getCategories(): Promise<Category[]> {
   const payload = await fetchJson<{ items?: Category[] } | Category[]>(
     "/api/categories",
     [],
+    false,
   );
   if (!payload) return [];
   return Array.isArray(payload) ? payload : (payload.items ?? []);
@@ -91,6 +92,11 @@ export async function getHeroImages(): Promise<HeroImage[]> {
   return (await fetchJson<HeroImage[]>("/api/hero-images", [], false)) ?? [];
 }
 
+export async function getAboutImage(): Promise<string | null> {
+  const payload = await fetchJson<{ image_url?: string }>("/api/about-image", null, false);
+  return payload?.image_url || null;
+}
+
 const DEFAULT_HOMEPAGE_CONTENT: HomepageContent = {
   ticker: [
     "Stone-ground, never beaten",
@@ -103,11 +109,11 @@ const DEFAULT_HOMEPAGE_CONTENT: HomepageContent = {
   categories: {
     title: "Shop by category",
     items: [
-      { slug: "breakfast-masalas", label: "Everyday Masalas", image_url: "https://shop.cookdtv.com/cdn/shop/files/cat-kulambu.png?v=1788332086&width=400", image_key: "", image_product_slug: "sambar-masala" },
-      { slug: "masala-powders", label: "Masala Powders", image_url: "https://img.magnific.com/free-psd/overhead-view-indian-spices-bowl_84443-93191.jpg?semt=ais_hybrid&w=740&q=80", image_key: "", image_product_slug: "biriyani-masala" },
-      { slug: "pure-spices", label: "Pure Spices", image_url: "https://tiimg.tistatic.com/fp/1/007/630/100-pure-turmeric-powder-for-food-spices-with-12-months-shelf-life-712.jpg", image_key: "", image_product_slug: "garam-masala" },
-      { slug: "podis", label: "Podis", image_url: "https://shop.cookdtv.com/cdn/shop/files/cat-podis.png?v=1788332086&width=400", image_key: "", image_product_slug: "rasam-podi" },
-      { slug: "pickles", label: "Pickles", image_url: "https://images.jdmagicbox.com/quickquotes/images_main/mtc4ntmwotgwoq-1785309809-ofhfv4jq.png", image_key: "", image_product_slug: "mango-pickle" },
+      { slug: "breakfast-masalas", label: "Everyday Masalas", image_url: "", image_key: "", image_product_slug: "sambar-masala" },
+      { slug: "masala-powders", label: "Masala Powders", image_url: "", image_key: "", image_product_slug: "biriyani-masala" },
+      { slug: "pure-spices", label: "Pure Spices", image_url: "", image_key: "", image_product_slug: "garam-masala" },
+      { slug: "podis", label: "Podis", image_url: "", image_key: "", image_product_slug: "rasam-podi" },
+      { slug: "pickles", label: "Pickles", image_url: "", image_key: "", image_product_slug: "mango-pickle" },
     ],
   },
   bestsellers: { title: "Bestsellers", product_slugs: [] },

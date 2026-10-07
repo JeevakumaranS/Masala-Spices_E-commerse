@@ -3,8 +3,10 @@ import type { Product } from "@/lib/types";
 import { SmartImage } from "@/components/ui/SmartImage";
 import { AddToCartButton } from "@/components/AddToCartButton";
 import { formatINR, percentOff } from "@/lib/format";
+import { getStartingMrp, getStartingPrice, getStartingVariant } from "@/lib/productPricing";
 import { cn } from "@/lib/cn";
 import { FlameIcon, TagIcon } from "@/components/ui/icons";
+import { WishlistButton } from "@/components/WishlistButton";
 
 type Props = {
   product: Product;
@@ -14,6 +16,7 @@ type Props = {
   density?: "comfortable" | "compact";
   /** Reduced decoration and motion for the homepage bestseller rail. */
   cardStyle?: "default" | "bestseller" | "deal";
+  imageAspect?: "square" | "portrait";
   imageOverride?: string;
   className?: string;
 };
@@ -23,13 +26,16 @@ export function ProductCard({
   priority = false,
   density = "comfortable",
   cardStyle = "default",
+  imageAspect,
   imageOverride,
   className,
 }: Props) {
   const href = `/collections/${product.categories[0] ?? "all"}/products/${product.slug}`;
   const image = imageOverride || product.images[0]?.url;
-  const off = percentOff(product.price, product.mrp);
-  const variant = product.variants[0] ?? null;
+  const price = getStartingPrice(product);
+  const mrp = getStartingMrp(product);
+  const off = percentOff(price, mrp);
+  const variant = product.is_combo ? null : getStartingVariant(product);
   const stock = variant?.stock_qty ?? 0;
   const bestsellerStyle = cardStyle === "bestseller";
   const dealStyle = cardStyle === "deal";
@@ -47,30 +53,40 @@ export function ProductCard({
         className,
       )}
     >
-      <Link href={href} className="relative block focus-visible:outline-offset-4">
-        <SmartImage
-          src={image}
-          alt={product.name}
-          aspect={dealStyle ? "aspect-[2.4/1]" : density === "compact" ? "aspect-square" : "aspect-[4/5]"}
-          priority={priority}
-          zoom={!bestsellerStyle}
-          className={bestsellerStyle ? "group-hover:scale-[1.02] !duration-200" : undefined}
-          sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 20vw"
-          wrapperClassName="transition-colors"
-        />
+      <div className="relative">
+        <Link href={href} className="relative block focus-visible:outline-offset-4">
+          <SmartImage
+            src={image}
+            alt={product.name}
+            aspect={
+              dealStyle
+                ? "aspect-[2.4/1]"
+                : imageAspect === "square" || (imageAspect === undefined && density === "compact")
+                  ? "aspect-square"
+                  : "aspect-[4/5]"
+            }
+            priority={priority}
+            zoom={!bestsellerStyle}
+            className={bestsellerStyle ? "group-hover:scale-[1.02] !duration-200" : undefined}
+            sizes="(max-width: 640px) 45vw, (max-width: 1024px) 30vw, 20vw"
+            wrapperClassName="transition-colors"
+          />
 
-        {/* Badges */}
-        <div className="absolute top-3 left-3 flex flex-col items-start gap-1.5">
-          {off > 0 ? <span className="badge-sale">{off}% off</span> : null}
-          {stock > 0 && stock <= 8 ? (
-            <span className="badge-accent">Only {stock} left</span>
+          <div className="absolute top-3 left-3 flex flex-col items-start gap-1.5">
+            {off > 0 ? <span className="badge-sale">{off}% off</span> : null}
+            {stock > 0 && stock <= 8 ? (
+              <span className="badge-accent">Only {stock} left</span>
+            ) : null}
+          </div>
+
+          {image && !bestsellerStyle ? (
+            <span className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink-950/55 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" aria-hidden="true" />
           ) : null}
+        </Link>
+        <div className="absolute top-3 right-3 z-10">
+          <WishlistButton product={product} compact />
         </div>
-
-        {image && !bestsellerStyle ? (
-          <span className="absolute inset-x-0 bottom-0 h-24 bg-gradient-to-t from-ink-950/55 to-transparent opacity-0 transition-opacity duration-300 group-hover:opacity-100" aria-hidden="true" />
-        ) : null}
-      </Link>
+      </div>
 
       <div className={cn("flex min-w-0 flex-1 flex-col", density === "compact" ? "p-3" : "p-4 sm:p-5", dealStyle && "min-h-0 p-2")}>
         {!dealStyle ? <div className="flex min-w-0 items-center gap-1.5">
@@ -121,11 +137,11 @@ export function ProductCard({
                   dealStyle ? "text-sm" : density === "compact" ? "text-base" : "text-xl",
                 )}
               >
-                {formatINR(product.price)}
+                {formatINR(price)}
               </span>
-              {product.mrp > product.price ? (
+              {mrp > price ? (
                 <span className="text-sm text-ink-400 line-through">
-                  {formatINR(product.mrp)}
+                  {formatINR(mrp)}
                 </span>
               ) : null}
             </div>

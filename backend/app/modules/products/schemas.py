@@ -44,10 +44,9 @@ class Product(BaseModel):
     name: str
     slug: str
     description: str
-    ingredients: List[str] = Field(default_factory=list)
-    price: float
-    mrp: float
-    discount_pct: int = 0
+    price: float | None = None
+    mrp: float | None = None
+    discount_pct: int | None = None
     spice_level: str = "mild"
     status: str = "active"
     is_combo: bool = False
@@ -56,7 +55,7 @@ class Product(BaseModel):
     images: List[ProductImage] = Field(default_factory=list)
     categories: List[str] = Field(default_factory=list)
     dish_type: str | None = None
-    is_veg: bool = True
+    is_veg: bool | None = None
     created_at: datetime | None = None
     updated_at: datetime | None = None
 

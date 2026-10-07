@@ -5,10 +5,10 @@ import re
 from typing import Any, Literal
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.database import notification_settings_table
+from app.core.database import session_factory
+from app.modules.notifications.settings import get_notification_settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,19 +32,20 @@ def _order_confirmation_body(order: dict[str, Any]) -> str:
 
 
 async def send_order_confirmation_sms(
-    db: AsyncSession,
     order: dict[str, Any],
 ) -> SmsDeliveryStatus:
-    result = await db.execute(
-        select(notification_settings_table).limit(1)
-    )
-    settings = result.mappings().first()
-    if settings is None or not settings["sms_enabled"]:
+    try:
+        async with session_factory() as db:
+            settings = await get_notification_settings(db)
+    except SQLAlchemyError:
+        logger.exception("Twilio order confirmation could not load its settings.")
+        return "failed"
+    if not settings.sms_enabled:
         return "disabled"
 
-    auth_token = settings["sms_api_key"]
-    account_sid = settings["sms_account_sid"]
-    sender_phone = settings["sms_sender_phone"]
+    auth_token = settings.sms_auth_token
+    account_sid = settings.sms_account_sid
+    sender_phone = settings.sms_sender_phone
     if not auth_token or not account_sid or not sender_phone:
         logger.error("Twilio order confirmation is enabled but its configuration is incomplete.")
         return "failed"

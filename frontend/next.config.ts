@@ -1,87 +1,28 @@
 import type { NextConfig } from "next";
 
+const rustfsPublicEndpoint = process.env.NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT;
+if (!rustfsPublicEndpoint) {
+  throw new Error("NEXT_PUBLIC_RUSTFS_PUBLIC_ENDPOINT must be configured.");
+}
+
+const rustfsUrl = new URL(rustfsPublicEndpoint);
+const rustfsBuckets = [
+  process.env.RUSTFS_BUCKET,
+  process.env.RUSTFS_LEGACY_BUCKET,
+].filter((bucket): bucket is string => Boolean(bucket));
+if (!rustfsBuckets.length) {
+  throw new Error("Configure RUSTFS_BUCKET in the frontend environment.");
+}
+
 const nextConfig: NextConfig = {
-  async rewrites() {
-    const apiTarget = (
-      process.env.API_PROXY_TARGET ??
-      process.env.NEXT_PUBLIC_API_URL ??
-      "http://localhost:8080"
-    ).replace(/\/+$/, "");
-
-    return [
-      {
-        source: "/api/:path*",
-        destination: `${apiTarget}/api/:path*`,
-      },
-    ];
-  },
-
   images: {
-    // Allow Next.js Image Optimization to fetch images from local RustFS.
-    // Development only.
-    dangerouslyAllowLocalIP: true,
-
-    remotePatterns: [
-      {
-        protocol: "https",
-        hostname: "images.unsplash.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "plus.unsplash.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "shop.cookdtv.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "img.magnific.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "tiimg.tistatic.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "images.jdmagicbox.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "https",
-        hostname: "assets.cookdtv.com",
-        pathname: "/**",
-      },
-      {
-        protocol: "http",
-        hostname: "localhost",
-        port: "8000",
-        pathname: "/**",
-      },
-      {
-        protocol: "http",
-        hostname: "127.0.0.1",
-        port: "8000",
-        pathname: "/**",
-      },
-      {
-        protocol: "http",
-        hostname: "localhost",
-        port: "9000",
-        pathname: "/masala-store/**",
-      },
-      {
-        protocol: "http",
-        hostname: "127.0.0.1",
-        port: "9000",
-        pathname: "/masala-store/**",
-      },
-    ],
+    dangerouslyAllowLocalIP: ["localhost", "127.0.0.1", "::1"].includes(rustfsUrl.hostname),
+    remotePatterns: rustfsBuckets.map((bucket) => ({
+      protocol: rustfsUrl.protocol.slice(0, -1) as "http" | "https",
+      hostname: rustfsUrl.hostname,
+      port: rustfsUrl.port,
+      pathname: `/${bucket}/**`,
+    })),
 
     formats: ["image/avif", "image/webp"],
     deviceSizes: [640, 750, 828, 1080, 1200, 1920, 2048],

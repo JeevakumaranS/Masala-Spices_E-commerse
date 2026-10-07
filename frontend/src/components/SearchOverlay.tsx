@@ -7,6 +7,7 @@ import { cn } from "@/lib/cn";
 import { getProducts, getRecipes } from "@/lib/api";
 import type { Product, Recipe } from "@/lib/types";
 import { formatINR } from "@/lib/format";
+import { getStartingPrice } from "@/lib/productPricing";
 import { useUIStore } from "@/store/ui";
 import {
   ArrowRightIcon,
@@ -117,7 +118,7 @@ export function SearchOverlay() {
     if (!needle) return [];
 
     const productHits = products.filter((product) =>
-      [product.name, product.description, product.spice_level, ...product.ingredients]
+      [product.name, product.description, product.spice_level, ...product.categories]
         .join(" ")
         .toLowerCase()
         .includes(needle),
@@ -318,7 +319,7 @@ export function SearchOverlay() {
                               </span>
                               <span className="block truncate text-xs text-ink-500">
                                 {hit.group === "Products"
-                                  ? `${hit.spice_level} · ${formatINR(hit.price)}`
+                                  ? `${hit.spice_level} · ${formatINR(getStartingPrice(hit))}`
                                   : hit.group === "Recipes"
                                     ? `${hit.cuisine} · ${hit.cook_time_minutes} mins`
                                     : "Help page"}

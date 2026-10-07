@@ -17,6 +17,8 @@ import { SelectField } from "@/components/ui/SelectField";
 import { SmartImage } from "@/components/ui/SmartImage";
 import { ArrowRightIcon, PlusIcon, SearchIcon, TrashIcon } from "@/components/ui/icons";
 import { formatINR } from "@/lib/format";
+import { getStartingPrice } from "@/lib/productPricing";
+import { useUIStore } from "@/store/ui";
 
 const fieldClass =
   "mt-1.5 w-full rounded-xl border border-paper-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 outline-none transition focus:border-masala-500 focus:ring-2 focus:ring-masala-500/15";
@@ -97,11 +99,11 @@ function displayStatus(value: string) {
 }
 
 export function HomepageManagement({ token, products, categories, heroImages, onRefresh }: Props) {
+  const showToast = useUIStore((state) => state.showToast);
   const [content, setContent] = useState<HomepageContent | null>(null);
   const [recipes, setRecipes] = useState<Recipe[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [message, setMessage] = useState("");
   const [error, setError] = useState("");
   const [heroFile, setHeroFile] = useState<File | null>(null);
   const [heroAlt, setHeroAlt] = useState("");
@@ -149,7 +151,6 @@ export function HomepageManagement({ token, products, categories, heroImages, on
 
   const updateContent = (updater: (current: HomepageContent) => HomepageContent) => {
     setContent((current) => current ? updater(current) : current);
-    setMessage("");
   };
 
   const setSearch = (section: string, value: string) => {
@@ -174,7 +175,6 @@ export function HomepageManagement({ token, products, categories, heroImages, on
 
   const uploadImage = async (file: File): Promise<{ image_key: string; image_url: string } | null> => {
     setError("");
-    setMessage("");
     try {
       return await uploadHomepageMedia(file, token);
     } catch (uploadError) {
@@ -187,10 +187,13 @@ export function HomepageManagement({ token, products, categories, heroImages, on
     if (!content) return;
     setSaving(true);
     setError("");
-    setMessage("");
     try {
       const normalizedContent = {
         ...content,
+        categories: {
+          ...content.categories,
+          items: content.categories.items.map((item) => ({ ...item, image_url: "" })),
+        },
         combos: {
           ...content.combos,
           product_slugs: content.combos.product_slugs.filter((slug) =>
@@ -209,7 +212,7 @@ export function HomepageManagement({ token, products, categories, heroImages, on
       const saved = await saveAdminHomepageContent(normalizedContent, token);
       setContent(saved);
       setTickerDraft(saved.ticker.join("\n"));
-      setMessage("Homepage content saved.");
+      showToast("Homepage content saved.", "success");
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Homepage content could not be saved.");
     } finally {
@@ -221,12 +224,11 @@ export function HomepageManagement({ token, products, categories, heroImages, on
     if (!heroFile) return;
     setSaving(true);
     setError("");
-    setMessage("");
     try {
       await uploadAdminHeroImage(heroFile, heroAlt.trim(), token);
       setHeroFile(null);
       setHeroAlt("");
-      setMessage("Hero image added.");
+      showToast("Hero image added.", "success");
       await onRefresh();
     } catch (uploadError) {
       setError(uploadError instanceof Error ? uploadError.message : "Hero image upload failed.");
@@ -239,10 +241,9 @@ export function HomepageManagement({ token, products, categories, heroImages, on
     if (!window.confirm("Remove this image from the homepage hero?")) return;
     setSaving(true);
     setError("");
-    setMessage("");
     try {
       await adminRequest(`/api/admin/hero-images/${image.id}`, token, { method: "DELETE" });
-      setMessage("Hero image removed.");
+      showToast("Hero image removed.", "success");
       await onRefresh();
     } catch (removeError) {
       setError(removeError instanceof Error ? removeError.message : "Hero image could not be removed.");
@@ -256,7 +257,6 @@ export function HomepageManagement({ token, products, categories, heroImages, on
     if (altText === undefined || altText === image.alt_text) return;
     setSaving(true);
     setError("");
-    setMessage("");
     try {
       await adminRequest(`/api/admin/hero-images/${image.id}`, token, {
         method: "PUT",
@@ -267,7 +267,7 @@ export function HomepageManagement({ token, products, categories, heroImages, on
         delete next[image.id];
         return next;
       });
-      setMessage("Hero photo description updated.");
+      showToast("Hero photo description updated.", "success");
       await onRefresh();
     } catch (saveError) {
       setError(saveError instanceof Error ? saveError.message : "Hero photo description could not be saved.");
@@ -323,7 +323,6 @@ export function HomepageManagement({ token, products, categories, heroImages, on
   return (
     <section className="mt-7">
       {error ? <p role="alert" className="mb-4 rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">{error}</p> : null}
-      {message ? <p role="status" className="mb-4 rounded-xl border border-cardamom-200 bg-cardamom-50 p-3 text-sm text-cardamom-700">{message}</p> : null}
 
       <div role="tablist" aria-label="Homepage sections" className="mb-5 flex gap-2 overflow-x-auto pb-2">
         {homepageSections.map((item) => (
@@ -517,7 +516,7 @@ export function HomepageManagement({ token, products, categories, heroImages, on
         {activeSection === "bestsellers" ? (
         <SectionCard title="Bestsellers" description="Add or remove catalog products from the homepage Bestsellers rail.">
           <SectionSearch id="bestsellers-search" label="Search products" value={sectionSearch.bestsellers ?? ""} onChange={(value) => setSearch("bestsellers", value)} />
-          <ProductChoices products={products} selected={content.bestsellers.product_slugs} onToggle={(slug) => toggleProduct("bestsellers", slug)} query={sectionSearch.bestsellers ?? ""} />
+          <ProductChoices products={products.filter((product) => !product.is_combo)} selected={content.bestsellers.product_slugs} onToggle={(slug) => toggleProduct("bestsellers", slug)} query={sectionSearch.bestsellers ?? ""} />
         </SectionCard>
         ) : null}
 
@@ -566,7 +565,7 @@ export function HomepageManagement({ token, products, categories, heroImages, on
                         <span className="min-w-0 truncate">{product.name}</span>
                       </label>
                       <SmartImage src={product.images[0]?.url} alt={product.name} aspect="aspect-square" sizes="(max-width: 640px) 50vw, 25vw" wrapperClassName="mt-3 rounded-lg" zoom={false} />
-                      <p className="mt-2 text-xs text-ink-600">{formatINR(product.price)} · {displayStatus(product.status)}</p>
+                      <p className="mt-2 text-xs text-ink-600">{formatINR(getStartingPrice(product))} · {displayStatus(product.status)}</p>
                     </article>
                   );
                 })}

@@ -12,11 +12,11 @@ class BlogPostInput(BaseModel):
     slug: str = Field(min_length=1, max_length=255)
     category: str = Field(min_length=1, max_length=120)
     published_at: date
-    hero_image_url: str = Field(min_length=1, max_length=2048)
+    hero_image_key: str = Field(min_length=1, max_length=512)
     body: str = Field(min_length=1, max_length=100000)
     status: Literal["draft", "published"] = "draft"
 
-    @field_validator("title", "category", "hero_image_url", "body")
+    @field_validator("title", "category", "hero_image_key", "body")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -32,9 +32,9 @@ class BlogPostInput(BaseModel):
             raise ValueError("Enter a valid blog URL slug.")
         return normalized
 
-    @field_validator("hero_image_url")
+    @field_validator("hero_image_key")
     @classmethod
-    def validate_hero_image_url(cls, value: str) -> str:
-        if value.startswith(("https://", "http://", "homepage/")):
+    def validate_hero_image_key(cls, value: str) -> str:
+        if value.startswith(("blog/", "homepage/", "masalafolder/blog/")):
             return value
-        raise ValueError("Use an HTTP(S) photo URL or a RustFS homepage image key.")
+        raise ValueError("Upload the photo to RustFS and provide its image key.")

@@ -8,7 +8,7 @@ export function ProductRail({
   title,
   description,
   navigationHref,
-  sectionClassName = "bg-white py-5 md:py-6",
+  sectionClassName = "bg-white pt-8 pb-2 md:pt-10 md:pb-3",
 }: {
   products: Product[];
   title: string;
@@ -21,7 +21,7 @@ export function ProductRail({
       <div className="shell">
         <div className="flex flex-col items-center gap-2 sm:relative sm:block">
           <div className="text-center sm:mx-auto sm:max-w-[calc(100%-11rem)]">
-            <h2 className="section-title text-[1.375rem] text-center md:text-[1.625rem]">{title}</h2>
+            <h2 className="section-title text-center text-3xl text-masala-900 md:text-4xl">{title}</h2>
             {description ? <p className="mt-1.5 text-center text-xs text-ink-500 sm:text-sm">{description}</p> : null}
           </div>
           {navigationHref ? (
@@ -36,17 +36,17 @@ export function ProductRail({
         </div>
 
         <div
-          className="no-scrollbar mt-5 flex w-full min-w-0 max-w-full gap-4 overflow-x-auto pb-2"
+          className="no-scrollbar mt-6 flex w-full min-w-0 max-w-full gap-4 overflow-x-auto px-1 pb-2"
         >
           {products.map((product, index) => (
             <div
               key={product.id}
-              className="h-full w-[65%] shrink-0 min-w-0 sm:w-[27%] lg:w-[21%]"
+              className="h-full w-[78%] shrink-0 min-w-0 sm:w-[34%] lg:w-[25%]"
             >
               <ProductCard
                 product={product}
                 priority={index < 3}
-                density="compact"
+                density="comfortable"
                 cardStyle="bestseller"
                 className="h-full w-full min-w-0"
               />

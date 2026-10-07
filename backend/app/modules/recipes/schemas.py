@@ -28,10 +28,10 @@ class RecipeInput(BaseModel):
     dish_type: str = Field(min_length=1, max_length=120)
     ingredients: list[str] = Field(min_length=1, max_length=100)
     steps: list[str] = Field(min_length=1, max_length=100)
-    hero_image_url: str = Field(min_length=1, max_length=2048)
+    hero_image_key: str = Field(min_length=1, max_length=512)
     video_url: str | None = Field(default=None, max_length=2048)
 
-    @field_validator("title", "cuisine", "dish_type", "hero_image_url")
+    @field_validator("title", "cuisine", "dish_type", "hero_image_key")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -39,14 +39,12 @@ class RecipeInput(BaseModel):
             raise ValueError("This field cannot be empty.")
         return value
 
-    @field_validator("hero_image_url")
+    @field_validator("hero_image_key")
     @classmethod
-    def validate_photo_reference(cls, value: str) -> str:
-        if value.startswith("homepage/"):
+    def validate_photo_key(cls, value: str) -> str:
+        if value.startswith(("recipes/", "homepage/", "masalafolder/recipes/")):
             return value
-        if value.startswith(("https://", "http://")):
-            return value
-        raise ValueError("Use an HTTP(S) photo URL or upload a photo to RustFS.")
+        raise ValueError("Upload the photo to RustFS and provide its image key.")
 
     @field_validator("slug")
     @classmethod

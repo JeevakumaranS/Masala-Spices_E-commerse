@@ -12,6 +12,7 @@ from app.modules.coupons.router import router as coupons_router
 from app.modules.enquiries.router import admin_router as admin_messages_router
 from app.modules.enquiries.router import router as enquiries_router
 from app.modules.health.router import router as health_router
+from app.modules.guests.router import router as guests_router
 from app.modules.homepage.router import router as homepage_router
 from app.modules.orders.router import router as orders_router
 from app.modules.newsletter.router import router as newsletter_router
@@ -21,6 +22,7 @@ from app.modules.stores.router import router as stores_router
 
 api_router = APIRouter()
 api_router.include_router(health_router)
+api_router.include_router(guests_router)
 api_router.include_router(homepage_router)
 api_router.include_router(categories_router)
 api_router.include_router(products_router)

@@ -6,10 +6,28 @@ import { EmptyState } from "@/components/ui/EmptyState";
 import { Reveal } from "@/components/ui/Reveal";
 import { getCategories, getProducts } from "@/lib/api";
 import type { Product } from "@/lib/types";
+import { getStartingPrice } from "@/lib/productPricing";
 import { cn } from "@/lib/cn";
 import { LeafIcon } from "@/components/ui/icons";
 
 export const dynamic = "force-dynamic";
+
+function normalizeCategoryKey(value: string): string {
+  return value.trim().toLowerCase().replace(/[\s_]+/g, "-");
+}
+
+function findCategory(category: string, categories: Awaited<ReturnType<typeof getCategories>>) {
+  const key = normalizeCategoryKey(category);
+  const exactMatch = categories.find(
+    (item) => normalizeCategoryKey(item.slug) === key || normalizeCategoryKey(item.name) === key,
+  );
+  if (exactMatch) return exactMatch;
+
+  const prefixMatches = categories.filter(
+    (item) => normalizeCategoryKey(item.slug).startsWith(`${key}-`),
+  );
+  return prefixMatches.length === 1 ? prefixMatches[0] : undefined;
+}
 
 /**
  * Metadata resolves before the HTML stream starts, so a bad slug returns a real
@@ -22,7 +40,7 @@ export async function generateMetadata({
   params: Promise<{ category: string }>;
 }): Promise<Metadata> {
   const { category } = await params;
-  const current = (await getCategories()).find((item) => item.slug === category);
+  const current = findCategory(category, await getCategories());
   if (!current) notFound();
 
   return {
@@ -53,9 +71,9 @@ function sortProducts(products: Product[], sort: SortKey): Product[] {
   const list = [...products];
   switch (sort) {
     case "price-asc":
-      return list.sort((a, b) => a.price - b.price);
+      return list.sort((a, b) => getStartingPrice(a) - getStartingPrice(b));
     case "price-desc":
-      return list.sort((a, b) => b.price - a.price);
+      return list.sort((a, b) => getStartingPrice(b) - getStartingPrice(a));
     case "newest":
       // The API exposes no timestamp — catalogue id order doubles as newest-first.
       return list.sort((a, b) => b.id.localeCompare(a.id));
@@ -75,13 +93,13 @@ export default async function CategoryPage({ params, searchParams }: Props) {
   const sortKey = normalizeSort(sort);
 
   const [categories, products] = await Promise.all([getCategories(), getProducts()]);
-  const current = categories.find((item) => item.slug === category);
+  const current = findCategory(category, categories);
 
   if (!current) {
     notFound();
   }
 
-  const filtered = products.filter((product) => product.categories.includes(category));
+  const filtered = products.filter((product) => product.categories.includes(current.slug));
   const visible = sortProducts(filtered, sortKey);
   const countLabel = `${visible.length} ${visible.length === 1 ? "blend" : "blends"}`;
 

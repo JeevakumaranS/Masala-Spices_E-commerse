@@ -5,6 +5,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from io import BytesIO
 from types import SimpleNamespace
+from typing import Literal
 from uuid import uuid4
 
 import psycopg
@@ -14,15 +15,18 @@ from fastapi.testclient import TestClient
 from fastapi.security import HTTPAuthorizationCredentials
 from jose import jwt
 from pydantic import ValidationError
+from starlette.datastructures import Headers
 
 from app.core.application import create_app
 from app.core.database import DATABASE_URL
 from app.core.database import admin_users_table
 from app.modules.admin import router as admin_router
 from app.modules.admin.auth import issue_token, require_admin
-from app.modules.admin.router import CouponInput
+from app.modules.admin.router import CategoryInput, CouponInput
+from app.modules.categories import router as categories_router
 from app.modules.coupons import router as coupons_router
 from app.modules.coupons.schemas import CouponValidateRequest
+from app.modules.homepage import router as homepage_router
 from app.modules.orders import router as orders_router
 from app.modules.orders.schemas import OrderCreateRequest
 from app.modules.products.router import hydrate_products
@@ -100,11 +104,10 @@ def test_homepage_management_routes_are_registered_and_protected(client: TestCli
     assert "/api/homepage-content" in paths
     assert "/api/admin/homepage-content" in paths
     assert "/api/admin/homepage-media" in paths
-    assert "/api/admin/homepage-media/sync" in paths
+    assert "/api/admin/homepage-media/sync" not in paths
 
     assert client.get("/api/admin/homepage-content").status_code == 401
     assert client.put("/api/admin/homepage-content", json={}).status_code == 401
-    assert client.post("/api/admin/homepage-media/sync").status_code == 401
     assert client.post(
         "/api/admin/homepage-media",
         files={"file": ("homepage.jpg", b"image", "image/jpeg")},
@@ -155,18 +158,64 @@ def test_create_hero_image_rejects_upload_after_limit() -> None:
     assert error.value.detail == "A maximum of 6 hero images is allowed."
 
 
+def test_hero_upload_uses_readable_alt_text_filename(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uploaded: list[str] = []
+
+    class InsertResult:
+        def mappings(self) -> "InsertResult":
+            return self
+
+        def one(self) -> dict[str, str]:
+            return {
+                "id": "hero-id",
+                "object_key": uploaded[0],
+                "alt_text": "Masala House Main Hero",
+            }
+
+    class HeroDatabase:
+        async def scalar(self, *_args: object, **_kwargs: object) -> int:
+            return 0
+
+        async def execute(self, *_args: object, **_kwargs: object) -> InsertResult:
+            return InsertResult()
+
+        async def commit(self) -> None:
+            return None
+
+    monkeypatch.setattr(storage, "object_exists", lambda _key: False)
+    monkeypatch.setattr(admin_router, "upload_file", lambda _file, key, _type: uploaded.append(key))
+    monkeypatch.setattr(admin_router, "get_file_url", lambda key: f"https://storage.example/{key}")
+
+    result = asyncio.run(
+        admin_router.create_hero_image(
+            file=UploadFile(
+                file=BytesIO(b"image"),
+                filename="random.png",
+                headers=Headers({"content-type": "image/png"}),
+            ),
+            alt_text="Masala House Main Hero",
+            db=HeroDatabase(),
+        )
+    )
+
+    assert uploaded == ["hero/masala-house-main-hero.png"]
+    assert result["object_key"] == uploaded[0]
+
+
 def test_hero_image_response_includes_presigned_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(admin_router, "get_file_url", lambda key: f"https://storage.example/{key}")
 
     response = asyncio.run(admin_router._hero_image_response({
         "id": "hero-id",
-        "object_key": "hero/hero-id/banner.jpg",
+        "object_key": "masalafolder/hero/hero-id/banner.jpg",
         "alt_text": "Spice blends",
         "sort_order": 0,
     }))
 
-    assert response["url"] == "https://storage.example/hero/hero-id/banner.jpg"
-    assert response["object_key"] == "hero/hero-id/banner.jpg"
+    assert response["url"] == "https://storage.example/masalafolder/hero/hero-id/banner.jpg"
+    assert response["object_key"] == "masalafolder/hero/hero-id/banner.jpg"
 
 
 def _fake_overview_dependencies(
@@ -340,6 +389,11 @@ def test_image_upload_uses_unique_product_scoped_keys(
         uploaded.append((object_name, content_type))
         return object_name
 
+    monkeypatch.setattr(
+        storage,
+        "object_exists",
+        lambda key: any(existing_key == key for existing_key, _ in uploaded),
+    )
     monkeypatch.setattr(uploads, "upload_file", record_upload)
     product_id = "00000000-0000-0000-0000-000000000001"
     responses = [
@@ -353,8 +407,129 @@ def test_image_upload_uses_unique_product_scoped_keys(
     assert all(response.status_code == 200 for response in responses)
     object_keys = [response.json()["object_key"] for response in responses]
     assert object_keys[0] != object_keys[1]
-    assert all(key.startswith(f"products/{product_id}/") and key.endswith(".png") for key in object_keys)
+    assert object_keys == [
+        f"products/{product_id}/test.png",
+        f"products/{product_id}/test-2.png",
+    ]
+    assert [response.json()["filename"] for response in responses] == [
+        "test.png",
+        "test-2.png",
+    ]
     assert uploaded == [(key, "image/png") for key in object_keys]
+
+
+@pytest.mark.parametrize(
+    ("section", "expected_prefix"),
+    [
+        ("homepage/categories", "homepage/categories/"),
+        ("blog", "blog/"),
+        ("recipes", "recipes/"),
+    ],
+)
+def test_homepage_media_upload_stores_images_under_the_section(
+    monkeypatch: pytest.MonkeyPatch,
+    section: Literal["homepage/categories", "blog", "recipes"],
+    expected_prefix: str,
+) -> None:
+    uploaded: list[str] = []
+    monkeypatch.setattr(
+        homepage_router,
+        "upload_file",
+        lambda _file, key, _content_type: uploaded.append(key),
+    )
+    monkeypatch.setattr(storage, "object_exists", lambda _key: False)
+    monkeypatch.setattr(
+        homepage_router,
+        "get_file_url",
+        lambda key: f"https://storage.example/{key}",
+    )
+
+    result = asyncio.run(
+        homepage_router.upload_homepage_media(
+            file=UploadFile(
+                file=BytesIO(b"image"),
+                filename="photo.jpg",
+                headers=Headers({"content-type": "image/jpeg"}),
+            ),
+            section=section,
+        )
+    )
+
+    assert result["image_key"] == f"{expected_prefix}photo.jpg"
+    assert result["image_key"] == uploaded[0]
+    assert result["image_url"] == f"https://storage.example/{result['image_key']}"
+
+
+def test_collection_media_upload_uses_flat_slug_named_rustfs_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    uploaded: list[str] = []
+    monkeypatch.setattr(storage, "object_exists", lambda _key: False)
+    monkeypatch.setattr(
+        homepage_router,
+        "upload_file",
+        lambda _file, key, _content_type: uploaded.append(key),
+    )
+    monkeypatch.setattr(
+        homepage_router,
+        "get_file_url",
+        lambda key: f"https://storage.example/{key}",
+    )
+
+    result = asyncio.run(
+        homepage_router.upload_homepage_media(
+            file=UploadFile(
+                file=BytesIO(b"image"),
+                filename="random.jpg",
+                headers=Headers({"content-type": "image/jpeg"}),
+            ),
+            section="collections",
+            name="garam-masalas",
+        )
+    )
+
+    assert result["image_key"].startswith("collections/garam-masalas-")
+    assert result["image_key"].endswith(".jpg")
+    assert result["image_key"].count("/") == 1
+    assert uploaded == [result["image_key"]]
+
+
+def test_category_image_key_is_limited_to_collection_storage() -> None:
+    category = CategoryInput(
+        name="Garam Masalas",
+        slug="garam-masalas",
+        image_key="collections/garam-masalas-12345678.jpg",
+    )
+    assert category.image_key == "collections/garam-masalas-12345678.jpg"
+
+    with pytest.raises(ValidationError):
+        CategoryInput(
+            name="Garam Masalas",
+            slug="garam-masalas",
+            image_key="products/garam-masala.jpg",
+        )
+
+
+def test_category_response_resolves_collection_image_key(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(
+        categories_router,
+        "get_file_url",
+        lambda key: f"https://storage.example/{key}",
+    )
+
+    category = asyncio.run(categories_router.category_response({
+        "id": uuid4(),
+        "name": "Garam Masalas",
+        "slug": "garam-masalas",
+        "type": "collection",
+        "description": None,
+        "image_key": "collections/garam-masalas-12345678.jpg",
+    }))
+
+    assert category["image_key"] == "collections/garam-masalas-12345678.jpg"
+    assert category["image_url"] == "https://storage.example/collections/garam-masalas-12345678.jpg"
 
 
 def test_storage_upload_sets_immutable_cache_headers(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -372,6 +547,18 @@ def test_storage_upload_sets_immutable_cache_headers(monkeypatch: pytest.MonkeyP
     }
 
 
+def test_storage_resolves_new_and_legacy_product_object_keys() -> None:
+    assert storage.get_object_key("products/product-id/image.jpg") == (
+        "products/product-id/image.jpg"
+    )
+    assert storage.get_object_key("masalafolder/products/product-id/image.jpg") == (
+        "masalafolder/products/product-id/image.jpg"
+    )
+    assert storage.get_object_key("collections/garam-masalas-12345678.jpg") == (
+        "collections/garam-masalas-12345678.jpg"
+    )
+
+
 def test_replaced_product_images_are_deleted_but_retained_images_are_not(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
@@ -387,7 +574,7 @@ def test_replaced_product_images_are_deleted_but_retained_images_are_not(
     assert deleted == ["products/old/image.jpg"]
 
 
-def test_product_hydration_resolves_object_keys_and_preserves_external_urls(
+def test_product_hydration_resolves_object_keys_and_skips_external_urls(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     class EmptyVariantResult:
@@ -402,6 +589,7 @@ def test_product_hydration_resolves_object_keys_and_preserves_external_urls(
             return EmptyVariantResult()
 
     monkeypatch.setattr("app.modules.products.router.object_exists", lambda key: True)
+    monkeypatch.setattr(storage, "_object_bucket", lambda _key: storage.BUCKET_NAME)
     product = {
         "id": "product-id",
         "name": "Test product",
@@ -413,14 +601,12 @@ def test_product_hydration_resolves_object_keys_and_preserves_external_urls(
     }
     hydrated = asyncio.run(hydrate_products(EmptyVariantDatabase(), [product]))
 
-    assert len(hydrated[0]["images"]) == 3
+    assert len(hydrated[0]["images"]) == 2
     assert hydrated[0]["images"][0]["url"].startswith("http://")
     assert "Signature=" in hydrated[0]["images"][0]["url"]
     assert hydrated[0]["images"][0]["object_key"] == "products/test.jpg"
     assert hydrated[0]["images"][1]["object_key"] == "products/legacy.jpg"
     assert hydrated[0]["images"][1]["url"] != product["images"][1]
-    assert hydrated[0]["images"][2]["url"] == "https://images.example.com/external.jpg"
-    assert hydrated[0]["images"][2]["object_key"] is None
 
 
 def test_product_hydration_skips_missing_legacy_storage_url(
@@ -438,6 +624,7 @@ def test_product_hydration_skips_missing_legacy_storage_url(
             return EmptyVariantResult()
 
     monkeypatch.setattr("app.modules.products.router.object_exists", lambda key: False)
+    monkeypatch.setattr(storage, "_object_bucket", lambda _key: storage.BUCKET_NAME)
     product = {
         "id": "product-id",
         "name": "Test product",
@@ -448,6 +635,133 @@ def test_product_hydration_skips_missing_legacy_storage_url(
     assert [image["object_key"] for image in hydrated[0]["images"]] == [
         "products/available.jpg",
     ]
+
+
+def test_product_hydration_skips_null_and_non_string_image_references(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    class EmptyVariantResult:
+        def mappings(self) -> "EmptyVariantResult":
+            return self
+
+        def __iter__(self) -> object:
+            return iter(())
+
+    class EmptyVariantDatabase:
+        async def execute(self, query: object) -> EmptyVariantResult:
+            return EmptyVariantResult()
+
+    monkeypatch.setattr(storage, "_object_bucket", lambda _key: storage.BUCKET_NAME)
+    product = {
+        "id": "product-id",
+        "name": "Test product",
+        "images": [None, 42, "products/valid.jpg"],
+    }
+    hydrated = asyncio.run(hydrate_products(EmptyVariantDatabase(), [product]))
+
+    assert [image["object_key"] for image in hydrated[0]["images"]] == [
+        "products/valid.jpg",
+    ]
+
+
+def test_combo_hydration_reads_catalog_components_from_json() -> None:
+    combo_id = uuid4()
+    product_id = uuid4()
+    variant_id = uuid4()
+    component_id = uuid4()
+
+    class CatalogResult:
+        def mappings(self) -> "CatalogResult":
+            return self
+
+        def __iter__(self) -> object:
+            return iter([{
+                "id": variant_id,
+                "product_id": product_id,
+                "name": "Catalog product",
+                "sku": "CAT-100",
+                "pack_size": "100 g",
+                "price": Decimal("30"),
+                "mrp": Decimal("50"),
+                "stock_qty": 4,
+            }])
+
+    class ComboDatabase:
+        async def execute(self, _query: object) -> CatalogResult:
+            return CatalogResult()
+
+    combo = {
+        "id": combo_id,
+        "name": "Catalog combo",
+        "images": [],
+        "catalog_products": [{
+            "id": str(component_id),
+            "product_id": str(product_id),
+            "variant_id": str(variant_id),
+            "quantity": 2,
+            "sort_order": 0,
+        }],
+        "is_combo": True,
+    }
+    hydrated = asyncio.run(hydrate_products(ComboDatabase(), [combo]))
+
+    assert hydrated[0]["combo_catalog_products"] == [{
+        "id": component_id,
+        "product_id": product_id,
+        "variant_id": variant_id,
+        "name": "Catalog product",
+        "sku": "CAT-100",
+        "quantity": 2,
+        "pack_size": "100 g",
+        "price": 30.0,
+        "mrp": 50.0,
+        "stock_qty": 4,
+    }]
+
+
+@pytest.mark.parametrize(
+    ("catalog_products", "raises_conflict"),
+    [
+        ([], False),
+        ([{"variant_id": "variant-id"}], True),
+    ],
+)
+def test_product_variant_removal_checks_combo_json_components(
+    catalog_products: list[dict[str, str]],
+    raises_conflict: bool,
+) -> None:
+    variant_id = uuid4()
+
+    class ComboReferenceResult:
+        def mappings(self) -> "ComboReferenceResult":
+            return self
+
+        def __iter__(self) -> object:
+            return iter([{"id": uuid4(), "catalog_products": [
+                {**catalog_products[0], "variant_id": str(variant_id)}
+            ] if catalog_products else []}])
+
+    class VariantRemovalDatabase:
+        async def execute(self, query: object) -> object:
+            statement = str(query.compile(compile_kwargs={"literal_binds": True}))
+            if "SELECT" in statement and "catalog_products" not in statement:
+                return iter([(variant_id,)])
+            if "catalog_products" in statement:
+                return ComboReferenceResult()
+            return None
+
+    operation = admin_router._replace_variants(
+        VariantRemovalDatabase(),
+        uuid4(),
+        [],
+    )
+    if raises_conflict:
+        with pytest.raises(HTTPException) as error:
+            asyncio.run(operation)
+        assert error.value.status_code == 409
+        assert error.value.detail == "Remove this pack from its combos before deleting it."
+    else:
+        asyncio.run(operation)
 
 
 def test_review_moderation_supports_put(client: TestClient) -> None:
@@ -491,7 +805,7 @@ def test_blog_admin_crud_requires_authentication(client: TestClient) -> None:
         "slug": "admin-only-draft",
         "category": "Basics",
         "published_at": "2026-10-05",
-        "hero_image_url": "https://images.example.test/spices.jpg",
+        "hero_image_key": "blog/spices.jpg",
         "body": "A private draft.",
         "status": "draft",
     }
@@ -543,6 +857,7 @@ def test_first_order_coupon_validation_reads_prior_order_identity(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     phone = "+919876543210"
+    product_id = uuid4()
     coupon = {
         "code": "FIRST10",
         "kind": "percentage",
@@ -557,7 +872,7 @@ def test_first_order_coupon_validation_reads_prior_order_identity(
     }
 
     class MappingResult:
-        def __init__(self, rows: list[dict[str, str]] = (), first: dict | None = None) -> None:
+        def __init__(self, rows: list[dict[str, object]] = (), first: dict | None = None) -> None:
             self.rows = rows
             self.first_row = first
 
@@ -576,10 +891,17 @@ def test_first_order_coupon_validation_reads_prior_order_identity(
 
         async def execute(self, query: object) -> MappingResult:
             self.query_count += 1
-            if self.query_count == 1:
+            query_text = str(query)
+            if "guest_cart_items" in query_text:
+                return MappingResult(rows=[{
+                    "product_id": product_id,
+                    "variant_id": None,
+                    "qty": 1,
+                }])
+            if "coupons" in query_text:
                 return MappingResult(first=coupon)
-            assert "orders.phone" in str(query)
-            assert "orders.email" in str(query)
+            assert "orders.phone" in query_text
+            assert "orders.email" in query_text
             return MappingResult(rows=[{"phone": phone, "email": "customer@example.com"}])
 
     async def quote_items(db: object, items: list[object]) -> list[SimpleNamespace]:
@@ -591,7 +913,7 @@ def test_first_order_coupon_validation_reads_prior_order_identity(
     response = asyncio.run(coupons_router.validate_coupon(
         CouponValidateRequest(
             code="FIRST10",
-            items=[{"product_id": uuid4(), "variant_id": None, "qty": 1}],
+            items=[{"product_id": product_id, "variant_id": None, "qty": 1}],
             phone=phone,
         ),
         db=FakeDatabase(),
@@ -614,8 +936,9 @@ def test_first_order_coupon_validation_reads_prior_order_identity(
                 country_code="IN",
                 delivery_mode="domestic",
                 coupon_code="FIRST10",
-                items=[{"product_id": uuid4(), "variant_id": None, "qty": 1}],
+                items=[{"product_id": product_id, "variant_id": None, "qty": 1}],
             ),
+            request=SimpleNamespace(state=SimpleNamespace(guest_id=uuid4())),
             db=FakeDatabase(),
         ))
 

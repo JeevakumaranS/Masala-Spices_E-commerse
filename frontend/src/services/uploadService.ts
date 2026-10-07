@@ -8,14 +8,22 @@ export type ProductImageUploadResult = {
 export async function uploadProductImage(
   file: File,
   productId: string,
+  options: { section?: "products" | "combos"; name?: string } = {},
 ): Promise<ProductImageUploadResult> {
   const formData = new FormData();
   formData.append("file", file);
+  const section = options.section ?? "products";
+  const params = {
+    product_id: productId,
+    section,
+    ...(options.name ? { name: options.name } : {}),
+  };
 
   try {
     const response = await apiClient.post<ProductImageUploadResult>(
-      `/api/uploads/image?product_id=${encodeURIComponent(productId)}`,
+      "/api/uploads/image",
       formData,
+      { params },
     );
     if (!response.data.object_key) {
       throw new Error("The server did not return an image object key.");
@@ -24,7 +32,7 @@ export async function uploadProductImage(
   } catch (error) {
     const apiUrl = apiClient.getUri({
       url: "/api/uploads/image",
-      params: { product_id: productId },
+      params,
     });
     const origin = typeof window === "undefined" ? "the current site" : window.location.origin;
     throw new Error(

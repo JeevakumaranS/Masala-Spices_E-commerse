@@ -25,7 +25,7 @@ type RecipeDraft = {
   dish_type: string;
   ingredients: string;
   steps: string;
-  hero_image_url: string;
+  hero_image_key: string;
   image_preview: string;
   video_url: string;
 };
@@ -79,7 +79,7 @@ export function RecipesManagement({ token }: { token: string }) {
       dish_type: recipe.dish_type,
       ingredients: recipe.ingredients.join("\n"),
       steps: recipe.steps.join("\n"),
-      hero_image_url: recipe.hero_image_key || recipe.hero_image_url,
+      hero_image_key: recipe.hero_image_key ?? "",
       image_preview: recipe.hero_image_url,
       video_url: recipe.video_url ?? "",
     } : {
@@ -90,7 +90,7 @@ export function RecipesManagement({ token }: { token: string }) {
       dish_type: "",
       ingredients: "",
       steps: "",
-      hero_image_url: "",
+      hero_image_key: "",
       image_preview: "",
       video_url: "",
     });
@@ -99,14 +99,18 @@ export function RecipesManagement({ token }: { token: string }) {
   const saveRecipe = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft) return;
+    if (!draft.hero_image_key && !photo) {
+      setError("Upload a recipe photo to RustFS before saving.");
+      return;
+    }
     setBusy(true);
     setError("");
     setMessage("");
     try {
-      let imageReference = draft.hero_image_url.trim();
+      let imageKey = draft.hero_image_key;
       if (photo) {
-        const uploaded = await uploadHomepageMedia(photo, token);
-        imageReference = uploaded.image_key;
+        const uploaded = await uploadHomepageMedia(photo, token, "recipes");
+        imageKey = uploaded.image_key;
       }
       const payload = {
         title: draft.title.trim(),
@@ -116,7 +120,7 @@ export function RecipesManagement({ token }: { token: string }) {
         dish_type: draft.dish_type.trim(),
         ingredients: draft.ingredients.split(/\r?\n/).map((item) => item.trim()).filter(Boolean),
         steps: draft.steps.split(/\r?\n/).map((step) => step.trim()).filter(Boolean),
-        hero_image_url: imageReference,
+        hero_image_key: imageKey,
         video_url: draft.video_url.trim() || null,
       };
       const previousSlug = draft.id ? recipes.find((recipe) => recipe.id === draft.id)?.slug : undefined;
@@ -171,16 +175,46 @@ export function RecipesManagement({ token }: { token: string }) {
           Add recipe
         </button>
       </div>
-      {error ? <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">{error}</p> : null}
+      {error && !draft ? <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">{error}</p> : null}
       {message ? <p role="status" className="rounded-xl border border-cardamom-200 bg-cardamom-50 p-3 text-sm text-cardamom-700">{message}</p> : null}
 
       {draft ? (
-        <form onSubmit={saveRecipe} className="space-y-4 rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-ink-900">{draft.id ? "Edit recipe" : "Create recipe"}</h3>
-            <button type="button" className={secondaryButton} onClick={() => { setDraft(null); setPhoto(null); }}>Cancel</button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-ink-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-5"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !busy) {
+              setDraft(null);
+              setPhoto(null);
+              setError("");
+            }
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="recipe-editor-title"
+            className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-3xl bg-paper-50 p-5 shadow-2xl sm:rounded-3xl sm:p-7"
+          >
+            <form onSubmit={saveRecipe} className="space-y-4">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div>
+                  <p className="eyebrow">Admin workspace</p>
+                  <h2 id="recipe-editor-title" className="mt-1 font-display text-2xl font-semibold text-ink-950">
+                    {draft.id ? "Edit recipe" : "Create recipe"}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-xl p-2 text-ink-500 hover:bg-paper-100 hover:text-ink-900 disabled:opacity-50"
+                  onClick={() => { setDraft(null); setPhoto(null); setError(""); }}
+                  disabled={busy}
+                  aria-label="Close recipe editor"
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+              {error ? <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">{error}</p> : null}
+              <div className="grid gap-3 sm:grid-cols-2">
             <label className={labelClass}>Recipe title
               <input required maxLength={255} className={fieldClass} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
             </label>
@@ -199,12 +233,10 @@ export function RecipesManagement({ token }: { token: string }) {
             <label className={labelClass}>Recipe video URL
               <input type="url" maxLength={2048} className={fieldClass} placeholder="https://…" value={draft.video_url} onChange={(event) => setDraft({ ...draft, video_url: event.target.value })} />
             </label>
-            <label className={`${labelClass} sm:col-span-2`}>Recipe photo URL
-              <input required={!photo && !draft.hero_image_url.trim()} type="url" maxLength={2048} className={fieldClass} placeholder="Optional when uploading a photo" value={draft.hero_image_url.startsWith("homepage/") ? "" : draft.hero_image_url} onChange={(event) => setDraft({ ...draft, hero_image_url: event.target.value, image_preview: event.target.value })} />
-            </label>
             <label className={`${labelClass} sm:col-span-2`}>Upload recipe photo to RustFS
-              <input type="file" accept="image/*" className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5`} onChange={(event) => setPhoto(event.currentTarget.files?.[0] ?? null)} />
+              <input required={!draft.hero_image_key && !photo} type="file" accept="image/*" className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5`} onChange={(event) => setPhoto(event.currentTarget.files?.[0] ?? null)} />
               {photo ? <span className="mt-1 block text-xs text-ink-500">{photo.name} will replace the current photo.</span> : null}
+              {!photo && draft.hero_image_key ? <span className="mt-1 block text-xs text-ink-500">Leave empty to keep the current photo.</span> : null}
             </label>
             {draft.image_preview ? (
               <SmartImage src={draft.image_preview} alt={`${draft.title || "Recipe"} preview`} aspect="aspect-video" sizes="(max-width: 640px) 100vw, 50vw" wrapperClassName="rounded-xl sm:col-span-2" zoom={false} />
@@ -215,11 +247,14 @@ export function RecipesManagement({ token }: { token: string }) {
             <label className={`${labelClass} sm:col-span-2`}>Cooking steps (one per line, in order)
               <textarea required rows={6} className={fieldClass} placeholder={"Cook the dal until soft.\nAdd vegetables and masala.\nFinish with tempering."} value={draft.steps} onChange={(event) => setDraft({ ...draft, steps: event.target.value })} />
             </label>
-          </div>
-          <div className="flex justify-end">
-            <button type="submit" className={primaryButton} disabled={busy}>{busy ? "Saving…" : draft.id ? "Save recipe" : "Create recipe"}</button>
-          </div>
-        </form>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className={secondaryButton} onClick={() => { setDraft(null); setPhoto(null); setError(""); }} disabled={busy}>Cancel</button>
+                <button type="submit" className={primaryButton} disabled={busy}>{busy ? "Saving…" : draft.id ? "Save recipe" : "Create recipe"}</button>
+              </div>
+            </form>
+          </section>
+        </div>
       ) : null}
 
       {loading ? <p role="status" className="text-sm text-ink-500">Loading recipes…</p> : recipes.length ? (

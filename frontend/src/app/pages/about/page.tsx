@@ -3,6 +3,7 @@ import Link from "next/link";
 import { Reveal } from "@/components/ui/Reveal";
 import { SectionHeading } from "@/components/ui/SectionHeading";
 import { SmartImage } from "@/components/ui/SmartImage";
+import { getAboutImage, getProducts } from "@/lib/api";
 import {
   ArrowRightIcon,
   CheckCircleIcon,
@@ -16,11 +17,6 @@ export const metadata: Metadata = {
   description:
     "The Masala House story — whole spices bought by the lot, slow-roasted in small batches and stone-ground in Chennai for flavour-first everyday cooking.",
 };
-
-const HERO_IMAGE =
-  "https://images.unsplash.com/photo-1596040033229-a9821ebd058d?auto=format&fit=crop&w=1600&q=80";
-const STORY_IMAGE =
-  "https://images.unsplash.com/photo-1509358271058-acd22cc93898?auto=format&fit=crop&w=1600&q=80";
 
 const VALUES = [
   {
@@ -47,7 +43,11 @@ const PROMISES = [
   "Sealed, dated and dispatched the same week",
 ];
 
-export default function AboutPage() {
+export default async function AboutPage() {
+  const [products, aboutImage] = await Promise.all([getProducts(), getAboutImage()]);
+  const heroImage = products.find((product) => product.slug === "sambar-masala")?.images[0]?.url;
+  const storyImage = aboutImage || products.find((product) => product.slug === "biriyani-masala")?.images[0]?.url;
+
   return (
     <>
       {/* ============================ HERO ============================ */}
@@ -64,7 +64,7 @@ export default function AboutPage() {
           </p>
 
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/collections/breakfast-masalas" className="btn btn-primary btn-lg">
+            <Link href="/search" className="btn btn-primary btn-lg">
               Shop the blends
               <ArrowRightIcon className="size-4" />
             </Link>
@@ -77,7 +77,7 @@ export default function AboutPage() {
         <Reveal delay={120}>
           <div className="mt-10 overflow-hidden rounded-3xl border border-paper-200 shadow-md">
             <SmartImage
-              src={HERO_IMAGE}
+              src={heroImage}
               alt="Assorted whole spices, seeds and ground masalas arranged on a pale wooden table"
               aspect="aspect-video"
               priority
@@ -159,7 +159,7 @@ export default function AboutPage() {
           <Reveal delay={120}>
             <div className="overflow-hidden rounded-3xl border border-paper-200 shadow-md">
               <SmartImage
-                src={STORY_IMAGE}
+                src={storyImage}
                 alt="Spoons of chilli powder, turmeric and ground masala beside coriander seeds and black peppercorns"
                 aspect="aspect-video"
                 sizes="(max-width: 1024px) 100vw, 46vw"

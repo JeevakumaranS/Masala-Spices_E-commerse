@@ -4,7 +4,6 @@ import { notFound } from "next/navigation";
 import { Accordion } from "@/components/ui/Accordion";
 import type { AccordionItem } from "@/components/ui/Accordion";
 import { Breadcrumbs } from "@/components/ui/Breadcrumbs";
-import { EmptyState } from "@/components/ui/EmptyState";
 import { Reveal } from "@/components/ui/Reveal";
 import { getProduct, getProducts, getRecipes } from "@/lib/api";
 import { LeafIcon, RefreshIcon, TruckIcon } from "@/components/ui/icons";
@@ -68,18 +67,10 @@ export default async function ProductPage({
 
   const categorySlug = product.categories[0] ?? "breakfast-masalas";
   const linkedRecipe = recipes.find(
-    (recipe) =>
-      recipe.dish_type.toLowerCase() === product.dish_type?.toLowerCase() ||
-      product.name.toLowerCase().includes(recipe.dish_type.toLowerCase()),
+    (recipe) => product.name.toLowerCase().includes(recipe.dish_type.toLowerCase()),
   );
 
   const details: AccordionItem[] = [
-    {
-      title: "Ingredients",
-      content: product.ingredients.length
-        ? `${product.ingredients.join(", ")}. Nothing else — no fillers, anti-caking agents or added colour.`
-        : "The full ingredient list isn't published for this jar yet — message us and we'll send the lab sheet for the current batch.",
-    },
     {
       title: "Shipping & returns",
       content:
@@ -126,36 +117,14 @@ export default async function ProductPage({
         </ul>
       </section>
 
-      {/* ============================ INGREDIENTS + DETAILS ============================ */}
+      {/* ============================ PRODUCT STORY + DETAILS ============================ */}
       <section className="bg-paper-100 py-14 md:py-20">
         <div className="shell grid gap-10 lg:grid-cols-2 lg:gap-14">
           <Reveal className="h-full">
             <div className="flex h-full flex-col">
-              <p className="eyebrow">What&apos;s in the jar</p>
-              <h2 className="section-title mt-3">Just spices — nothing to hide</h2>
-              <p className="lede mt-3">
-                Every spoon of {product.name} is ground from whole spices we roast ourselves —
-                measured for a real kitchen, not a factory line.
-              </p>
-
-              {product.ingredients.length > 0 ? (
-                <ul className="mt-6 flex flex-wrap gap-2">
-                  {product.ingredients.map((ingredient) => (
-                    <li key={ingredient} className="chip !bg-white !text-ink-700">
-                      {ingredient}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <div className="mt-6">
-                  <EmptyState
-                    eyebrow="Ingredients"
-                    title="Ingredient list pending"
-                    description="We publish the full list for each batch as it comes off the mill. Ask us and we'll send it over."
-                    action={{ label: "Contact the kitchen", href: "/pages/contact" }}
-                  />
-                </div>
-              )}
+              <p className="eyebrow">About this blend</p>
+              <h2 className="section-title mt-3">{product.name}</h2>
+              <p className="lede mt-3">{product.description}</p>
             </div>
           </Reveal>
 
@@ -178,7 +147,7 @@ export default async function ProductPage({
           </div>
           <dl className="grid gap-x-8 gap-y-5 sm:grid-cols-2">
             {[
-              ["Net weight", product.net_weight ?? product.variants[0]?.pack_size ?? "See pack selector"],
+              ["Pack size", product.variants[0]?.pack_size ?? "See pack selector"],
               ["Spice level", product.spice_level],
               ["Salt", product.contains_salt ? "Included" : "Not included"],
             ].map(([label, value]) => (

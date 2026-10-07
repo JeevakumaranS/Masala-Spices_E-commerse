@@ -42,12 +42,12 @@ export function Toast() {
     <div
       role="status"
       aria-live="polite"
-      className="pointer-events-none fixed inset-x-0 bottom-5 z-[120] flex justify-center px-4"
+      className="pointer-events-none fixed right-4 top-5 z-[120] flex justify-end sm:right-6 sm:top-6"
     >
       <div
         key={toast.id}
         className={cn(
-          "pointer-events-auto flex w-full max-w-md items-center gap-3 rounded-2xl border px-4 py-3 shadow-lg animate-pop",
+          "pointer-events-auto flex w-[calc(100vw-2rem)] max-w-md items-center gap-3 rounded-2xl border px-4 py-3 shadow-lg animate-pop",
           className,
         )}
       >

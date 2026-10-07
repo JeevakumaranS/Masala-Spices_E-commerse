@@ -18,13 +18,9 @@ import {
   SearchIcon,
   ArrowRightIcon,
   PhoneIcon,
+  HeartIcon,
 } from "@/components/ui/icons";
-
-const FALLBACK_CATEGORIES: Pick<Category, "name" | "slug">[] = [
-  { name: "Breakfast Masalas", slug: "breakfast-masalas" },
-  { name: "Everyday Blends", slug: "spice-blends" },
-  { name: "Whole Spices", slug: "pure-spices" },
-];
+import { useWatchlistHydrated, useWatchlistStore } from "@/store/watchlist";
 
 const STATIC_NAV = [
   { label: "Recipes", href: "/recipes" },
@@ -79,6 +75,9 @@ export function Header() {
   const lines = useCartStore((s) => s.lines);
   const hydrated = useCartHydrated();
   const cartCount = hydrated ? selectCount(lines) : 0;
+  const watchlistSlugs = useWatchlistStore((s) => s.slugs);
+  const watchlistHydrated = useWatchlistHydrated();
+  const watchlistCount = watchlistHydrated ? watchlistSlugs.length : 0;
 
   /* ---- scroll shadow ---- */
   useEffect(() => {
@@ -93,9 +92,7 @@ export function Header() {
     let cancelled = false;
     getCategories()
       .then((items) => {
-        if (!cancelled && items.length) {
-          setCategories(items);
-        }
+        if (!cancelled) setCategories(items);
       })
       .catch(() => undefined);
     return () => {
@@ -175,7 +172,6 @@ export function Header() {
     };
   }, []);
 
-  const navCategories = categories.length ? categories : FALLBACK_CATEGORIES;
   const shopCategories = categories.filter(
     (category) => category.type === "product_type",
   );
@@ -186,10 +182,6 @@ export function Header() {
   const shopCollections = categories.filter(
     (category) => category.type === "collection",
   );
-  const categoryLinks = shopCategories.length ? shopCategories : navCategories;
-  const regionLinks = shopRegions;
-  const dishLinks = shopDishes;
-  const offerLinks = shopCollections;
   const openShopMenu = () => {
     if (shopCloseTimeout.current !== null) {
       window.clearTimeout(shopCloseTimeout.current);
@@ -295,19 +287,19 @@ export function Header() {
                   <div className="grid grid-cols-2 gap-5 rounded-3xl border border-paper-200 bg-white p-5 text-ink-800 shadow-xl shadow-ink-900/15 sm:grid-cols-4 sm:gap-6 sm:p-6">
                     <ShopMenuColumn
                       title="Shop by category"
-                      items={categoryLinks}
+                      items={shopCategories}
                     />
                     <ShopMenuColumn
                       title="Shop by region"
-                      items={regionLinks}
+                      items={shopRegions}
                     />
-                    <ShopMenuColumn title="Shop by dish" items={dishLinks} />
+                    <ShopMenuColumn title="Shop by dish" items={shopDishes} />
                     <div>
                       <p className="mb-4 text-[0.7rem] font-bold tracking-[0.16em] text-ink-500 uppercase">
                         Offers &amp; collections
                       </p>
                       <ul className="space-y-1.5">
-                        {offerLinks.map((category) => (
+                        {shopCollections.map((category) => (
                           <li key={category.slug}>
                             <Link
                               href={`/collections/${category.slug}`}
@@ -317,14 +309,6 @@ export function Header() {
                             </Link>
                           </li>
                         ))}
-                        <li>
-                          <Link
-                            href="/search"
-                            className="flex rounded-xl px-3 py-2.5 text-sm font-semibold text-masala-700 transition hover:bg-masala-50"
-                          >
-                            All products
-                          </Link>
-                        </li>
                       </ul>
                     </div>
                   </div>
@@ -378,6 +362,25 @@ export function Header() {
               className="hidden rounded-full bg-paper-50 px-4 py-2 text-sm font-semibold text-ink-950 transition hover:bg-white sm:inline-flex"
             >
               Track order
+            </Link>
+
+            <Link
+              href="/watchlist"
+              aria-label={watchlistCount > 0 ? `Open watchlist, ${watchlistCount} saved items` : "Open watchlist"}
+              className="relative grid size-9 place-items-center rounded-full bg-paper-50 text-ink-950 transition hover:bg-white"
+            >
+              <HeartIcon className={cn("size-4.5", watchlistCount > 0 && "fill-masala-600 text-masala-600")} />
+              <span
+                aria-hidden="true"
+                className={cn(
+                  "absolute -top-1 -right-1 grid min-w-3.5 place-items-center rounded-full px-1 text-[0.55rem] leading-3.5 font-bold transition-all duration-300",
+                  watchlistCount > 0
+                    ? "scale-100 bg-masala-600 text-white"
+                    : "scale-0 bg-masala-600",
+                )}
+              >
+                {watchlistCount}
+              </span>
             </Link>
 
             <button
@@ -458,7 +461,7 @@ export function Header() {
           <nav aria-label="Mobile" className="flex-1 overflow-y-auto px-4 py-5">
             <p className="eyebrow px-2 pb-2">Collections</p>
             <ul className="space-y-1">
-              {navCategories.map((category) => (
+              {categories.map((category) => (
                 <li key={category.slug}>
                   <Link
                     href={`/collections/${category.slug}`}

@@ -8,13 +8,6 @@ import { useUIStore } from "@/store/ui";
 import { apiClient } from "@/lib/http";
 import { ArrowRightIcon, CheckCircleIcon } from "@/components/ui/icons";
 
-const VOLUMES = [
-  "10–50 kg per month",
-  "51–200 kg per month",
-  "201–1,000 kg per month",
-  "1,000+ kg per month",
-] as const;
-
 /** Strip formatting and country/trunk prefixes so `98765 43210`, `+91 98765 43210`
  *  and `09876543210` all collapse to the same 10 digits. */
 function normaliseIndianMobile(value: string): string {
@@ -27,7 +20,6 @@ function normaliseIndianMobile(value: string): string {
 const isIndianMobile = (value: string) => /^[6-9]\d{9}$/.test(normaliseIndianMobile(value));
 
 const bulkSchema = z.object({
-  companyName: z.string().trim().min(2, "Enter your company or business name."),
   contactName: z.string().trim().min(2, "Enter the name we should ask for."),
   email: z.email("Enter a valid email address so we can send the quote."),
   phone: z
@@ -35,13 +27,6 @@ const bulkSchema = z.object({
     .trim()
     .min(1, "Enter a contact number.")
     .refine(isIndianMobile, "Enter a 10-digit Indian mobile number starting with 6–9."),
-  volume: z
-    .string()
-    .min(1, "Choose your estimated monthly volume.")
-    .refine(
-      (value) => (VOLUMES as readonly string[]).includes(value),
-      "Choose your estimated monthly volume.",
-    ),
   requirements: z
     .string()
     .trim()
@@ -64,11 +49,9 @@ export function BulkOrderForm() {
   } = useForm<BulkValues>({
     resolver: zodResolver(bulkSchema),
     defaultValues: {
-      companyName: "",
       contactName: "",
       email: "",
       phone: "",
-      volume: "",
       requirements: "",
     },
     mode: "onTouched",
@@ -84,11 +67,8 @@ export function BulkOrderForm() {
         name: values.contactName,
         email: values.email,
         phone: values.phone,
-        company_name: values.companyName,
         subject: "Bulk orders",
         message: values.requirements,
-        source: "bulk_order",
-        details: { monthly_volume: values.volume },
       });
 
       const firstName = values.contactName.split(" ")[0];
@@ -129,48 +109,25 @@ export function BulkOrderForm() {
 
   return (
     <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-5">
-      <div className="grid gap-5 sm:grid-cols-2">
-        <div>
-          <label htmlFor="bulk-company" className="field-label">
-            Company name
-          </label>
-          <input
-            id="bulk-company"
-            type="text"
-            autoComplete="organization"
-            placeholder="Annapoorna Restaurants"
-            className="input"
-            aria-invalid={Boolean(errors.companyName)}
-            aria-describedby={errors.companyName ? "bulk-company-error" : undefined}
-            {...register("companyName")}
-          />
-          {errors.companyName ? (
-            <p id="bulk-company-error" className="field-error">
-              {errors.companyName.message}
-            </p>
-          ) : null}
-        </div>
-
-        <div>
-          <label htmlFor="bulk-contact" className="field-label">
-            Contact name
-          </label>
-          <input
-            id="bulk-contact"
-            type="text"
-            autoComplete="name"
-            placeholder="Ravi Kumar"
-            className="input"
-            aria-invalid={Boolean(errors.contactName)}
-            aria-describedby={errors.contactName ? "bulk-contact-error" : undefined}
-            {...register("contactName")}
-          />
-          {errors.contactName ? (
-            <p id="bulk-contact-error" className="field-error">
-              {errors.contactName.message}
-            </p>
-          ) : null}
-        </div>
+      <div>
+        <label htmlFor="bulk-contact" className="field-label">
+          Contact name
+        </label>
+        <input
+          id="bulk-contact"
+          type="text"
+          autoComplete="name"
+          placeholder="Ravi Kumar"
+          className="input"
+          aria-invalid={Boolean(errors.contactName)}
+          aria-describedby={errors.contactName ? "bulk-contact-error" : undefined}
+          {...register("contactName")}
+        />
+        {errors.contactName ? (
+          <p id="bulk-contact-error" className="field-error">
+            {errors.contactName.message}
+          </p>
+        ) : null}
       </div>
 
       <div className="grid gap-5 sm:grid-cols-2">
@@ -220,31 +177,6 @@ export function BulkOrderForm() {
             </p>
           )}
         </div>
-      </div>
-
-      <div>
-        <label htmlFor="bulk-volume" className="field-label">
-          Estimated volume
-        </label>
-        <select
-          id="bulk-volume"
-          className="input cursor-pointer"
-          aria-invalid={Boolean(errors.volume)}
-          aria-describedby={errors.volume ? "bulk-volume-error" : undefined}
-          {...register("volume")}
-        >
-          <option value="">Select a range…</option>
-          {VOLUMES.map((volume) => (
-            <option key={volume} value={volume}>
-              {volume}
-            </option>
-          ))}
-        </select>
-        {errors.volume ? (
-          <p id="bulk-volume-error" className="field-error">
-            {errors.volume.message}
-          </p>
-        ) : null}
       </div>
 
       <div>

@@ -86,7 +86,7 @@ async def signup_for_updates(
         email_status: Literal["sent", "already_sent", "failed", "disabled"] = "already_sent"
         if subscription["confirmation_sent_at"] is None:
             logger.info("Attempting Brevo newsletter confirmation delivery.")
-            email_status = await send_newsletter_signup_email(db, payload.email)
+            email_status = await send_newsletter_signup_email(payload.email)
             if email_status == "sent":
                 await db.execute(
                     update(updates_table)

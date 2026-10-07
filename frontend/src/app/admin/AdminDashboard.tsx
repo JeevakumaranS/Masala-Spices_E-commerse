@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
-import type { SelectHTMLAttributes } from "react";
 import Link from "next/link";
 import {
   AdminCategory,
@@ -19,9 +18,8 @@ import {
   getAdminRegistrationStatus,
   adminLogin,
   adminRequest,
-  revealAdminIntegrationApiKey,
-  revealAdminTwilioCredentials,
   registerAdmin,
+  uploadHomepageMedia,
 } from "@/lib/admin";
 import { HomepageManagement } from "@/app/admin/HomepageManagement";
 import { BlogManagement } from "@/app/admin/BlogManagement";
@@ -34,8 +32,6 @@ import {
   ArrowRightIcon,
   BagIcon,
   CheckCircleIcon,
-  EyeIcon,
-  EyeOffIcon,
   FlameIcon,
   HomeIcon,
   LogOutIcon,
@@ -53,10 +49,12 @@ import {
   UtensilsIcon,
 } from "@/components/ui/icons";
 import { formatINR, formatShortINR } from "@/lib/format";
+import { getStartingPrice } from "@/lib/productPricing";
 import { uploadProductImage } from "@/services/uploadService";
+import { useUIStore } from "@/store/ui";
 
 type Section = "overview" | "orders" | "products" | "homepage" | "recipes" | "blog" | "messages" | "categories" | "campaigns" | "coupons" | "reviews" | "analytics" | "api";
-type OrderFilter = "all" | "placed" | "processing" | "shipped";
+type OrderFilter = "all" | "placed" | "processing" | "shipped" | "delivered";
 type PaginationProps = {
   page: number;
   pageSize: number;
@@ -64,6 +62,7 @@ type PaginationProps = {
   onPageChange: (page: number) => void;
 };
 type VariantDraft = {
+  id?: string;
   pack_size: string;
   price: string;
   mrp: string;
@@ -83,14 +82,13 @@ type ProductDraft = {
   name: string;
   slug: string;
   description: string;
-  ingredients: string;
-  categories: string;
+  categories: string[];
   dish_type: string;
   status: string;
   price: string;
   mrp: string;
   spice_level: string;
-  image_url: string;
+  images: AdminProduct["images"];
   variants: VariantDraft[];
   combo_catalog_products: ComboCatalogProductDraft[];
 };
@@ -126,13 +124,14 @@ const NAV: { id: Section; label: string; Icon: typeof HomeIcon }[] = [
   { id: "api", label: "API & notifications", Icon: ShieldIcon },
 ];
 
-const ORDER_STAGES: AdminOrder["status"][] = ["placed", "processing", "shipped", "delivered"];
 const ADMIN_PAGE_SIZE = 10;
+const ADMIN_CATEGORIES_PAGE_SIZE = 9;
 const ORDER_FILTERS: { id: OrderFilter; label: string }[] = [
   { id: "all", label: "All orders" },
   { id: "placed", label: "New orders" },
   { id: "processing", label: "Processing" },
   { id: "shipped", label: "Shipped" },
+  { id: "delivered", label: "Delivered" },
 ];
 const NEXT_ORDER_STAGE: Partial<Record<AdminOrder["status"], AdminOrder["status"]>> = {
   placed: "processing",
@@ -315,6 +314,7 @@ function ImageUploadField({
   title,
   hint,
   file,
+  previewSrc,
   required = false,
   className = "",
   onChange,
@@ -323,6 +323,7 @@ function ImageUploadField({
   title: string;
   hint: string;
   file: File | null;
+  previewSrc?: string | null;
   required?: boolean;
   className?: string;
   onChange: (file: File | null) => void;
@@ -366,6 +367,15 @@ function ImageUploadField({
           {file ? "Change" : "Browse"}
         </span>
       </label>
+      {previewSrc ? (
+        <SmartImage
+          src={previewSrc}
+          alt={file?.name ?? title}
+          aspect="aspect-square"
+          sizes="128px"
+          wrapperClassName="mt-3 w-32 rounded-xl border border-paper-200"
+        />
+      ) : null}
     </div>
   );
 }
@@ -416,6 +426,7 @@ function Modal({
 
 export default function AdminDashboard() {
   const token = useSyncExternalStore(subscribeAdminSession, getAdminSession, () => "");
+  const showToast = useUIStore((state) => state.showToast);
   const [section, setSection] = useState<Section>("overview");
   const [orderFilter, setOrderFilter] = useState<OrderFilter>("all");
   const [ordersPage, setOrdersPage] = useState(1);
@@ -429,6 +440,7 @@ export default function AdminDashboard() {
   const [products, setProducts] = useState<AdminProduct[]>([]);
   const [heroImages, setHeroImages] = useState<AdminHeroImage[]>([]);
   const [categories, setCategories] = useState<AdminCategory[]>([]);
+  const [categoryImageFile, setCategoryImageFile] = useState<File | null>(null);
   const [orders, setOrders] = useState<AdminOrder[]>([]);
   const [coupons, setCoupons] = useState<AdminCoupon[]>([]);
   const [reviews, setReviews] = useState<AdminReview[]>([]);
@@ -436,18 +448,19 @@ export default function AdminDashboard() {
   const [analyticsError, setAnalyticsError] = useState("");
   const [overviewErrors, setOverviewErrors] = useState<Record<string, string>>({});
   const [integrationSettings, setIntegrationSettings] = useState<AdminIntegrationSettings | null>(null);
-  const [smsApiKey, setSmsApiKey] = useState("");
-  const [smsAccountSid, setSmsAccountSid] = useState("");
-  const [smsSenderPhone, setSmsSenderPhone] = useState("");
-  const [emailApiKey, setEmailApiKey] = useState("");
-  const [smsApiKeyVisible, setSmsApiKeyVisible] = useState(false);
-  const [emailApiKeyVisible, setEmailApiKeyVisible] = useState(false);
-  const [smsApiKeyDirty, setSmsApiKeyDirty] = useState(false);
-  const [smsAccountSidDirty, setSmsAccountSidDirty] = useState(false);
-  const [emailApiKeyDirty, setEmailApiKeyDirty] = useState(false);
-  const [clearSmsApiKey, setClearSmsApiKey] = useState(false);
-  const [clearEmailApiKey, setClearEmailApiKey] = useState(false);
   const [integrationSettingsError, setIntegrationSettingsError] = useState("");
+  const [notificationDraft, setNotificationDraft] = useState({
+    sms_enabled: false,
+    sms_account_sid: "",
+    sms_sender_phone: "",
+    email_enabled: false,
+    email_sender_name: "",
+    email_sender_email: "",
+  });
+  const [smsAuthTokenDraft, setSmsAuthTokenDraft] = useState("");
+  const [emailApiKeyDraft, setEmailApiKeyDraft] = useState("");
+  const [showSmsAuthToken, setShowSmsAuthToken] = useState(false);
+  const [showEmailApiKey, setShowEmailApiKey] = useState(false);
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -465,15 +478,25 @@ export default function AdminDashboard() {
   const [newAdminEmail, setNewAdminEmail] = useState("");
   const [newAdminPassword, setNewAdminPassword] = useState("");
   const [adminRegistrationError, setAdminRegistrationError] = useState("");
-  const [adminRegistrationNotice, setAdminRegistrationNotice] = useState("");
   const [productEditor, setProductEditor] = useState<ProductDraft | null>(null);
   const [selectedProductImage, setSelectedProductImage] = useState<File | null>(null);
+  const [selectedProductImagePreview, setSelectedProductImagePreview] = useState<string | null>(null);
   const [categoryEditor, setCategoryEditor] = useState<AdminCategory | null | "new">(null);
   const [couponEditor, setCouponEditor] = useState<AdminCoupon | null | "new">(null);
   const [couponKind, setCouponKind] = useState<AdminCoupon["kind"]>("percentage");
   const [activeOrder, setActiveOrder] = useState<AdminOrder | null>(null);
   const [originalOrderStatus, setOriginalOrderStatus] = useState("");
   const [comboCatalogProductToAdd, setComboCatalogProductToAdd] = useState("");
+
+  const handleProductImageChange = useCallback((file: File | null) => {
+    setSelectedProductImage(file);
+    setSelectedProductImagePreview(file ? URL.createObjectURL(file) : null);
+  }, []);
+
+  useEffect(() => {
+    if (!selectedProductImagePreview) return;
+    return () => URL.revokeObjectURL(selectedProductImagePreview);
+  }, [selectedProductImagePreview]);
 
   const navigateToSection = (nextSection: Section) => {
     setNotice("");
@@ -547,32 +570,21 @@ export default function AdminDashboard() {
           "/api/admin/integration-settings",
           token,
         );
-        const [savedSmsCredentials, savedEmailApiKey] = await Promise.all([
-          settings.sms_api_key_configured
-            ? revealAdminTwilioCredentials(token)
-            : Promise.resolve({
-                account_sid: "",
-                auth_token: "",
-                sender_phone: settings.sms_sender_phone,
-              }),
-          settings.email_api_key_configured
-            ? revealAdminIntegrationApiKey("email", token)
-            : Promise.resolve(""),
-        ]);
         if (cancelled) return;
         setIntegrationSettings(settings);
+        setNotificationDraft({
+          sms_enabled: settings.sms_enabled,
+          sms_account_sid: settings.sms_account_sid,
+          sms_sender_phone: settings.sms_sender_phone,
+          email_enabled: settings.email_enabled,
+          email_sender_name: settings.email_sender_name,
+          email_sender_email: settings.email_sender_email,
+        });
+        setSmsAuthTokenDraft(settings.sms_auth_token);
+        setEmailApiKeyDraft(settings.email_api_key);
+        setShowSmsAuthToken(false);
+        setShowEmailApiKey(false);
         setIntegrationSettingsError("");
-        setSmsApiKey(savedSmsCredentials.auth_token);
-        setSmsAccountSid(savedSmsCredentials.account_sid);
-        setSmsSenderPhone(savedSmsCredentials.sender_phone);
-        setEmailApiKey(savedEmailApiKey);
-        setSmsApiKeyVisible(false);
-        setEmailApiKeyVisible(false);
-        setSmsApiKeyDirty(false);
-        setSmsAccountSidDirty(false);
-        setEmailApiKeyDirty(false);
-        setClearSmsApiKey(false);
-        setClearEmailApiKey(false);
       } catch (error: unknown) {
         if (!cancelled) {
           setIntegrationSettingsError(error instanceof Error ? error.message : "Integration settings could not be loaded.");
@@ -589,12 +601,52 @@ export default function AdminDashboard() {
     setNotice("");
     try {
       await action();
-      setNotice(successMessage);
+      showToast(successMessage, "success");
       await refresh(true);
       return true;
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "The action could not be completed.");
       return false;
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const saveNotificationSettings = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!token) return;
+
+    setBusy(true);
+    setNotice("");
+    try {
+      const settings = await adminRequest<AdminIntegrationSettings>(
+        "/api/admin/integration-settings",
+        token,
+        {
+          method: "PUT",
+          body: JSON.stringify({
+            ...notificationDraft,
+            sms_auth_token: smsAuthTokenDraft,
+            email_api_key: emailApiKeyDraft,
+          }),
+        },
+      );
+      setIntegrationSettings(settings);
+      setNotificationDraft({
+        sms_enabled: settings.sms_enabled,
+        sms_account_sid: settings.sms_account_sid,
+        sms_sender_phone: settings.sms_sender_phone,
+        email_enabled: settings.email_enabled,
+        email_sender_name: settings.email_sender_name,
+        email_sender_email: settings.email_sender_email,
+      });
+      setSmsAuthTokenDraft(settings.sms_auth_token);
+      setEmailApiKeyDraft(settings.email_api_key);
+      setShowSmsAuthToken(false);
+      setShowEmailApiKey(false);
+      showToast("Notification settings saved.", "success");
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Notification settings could not be saved.");
     } finally {
       setBusy(false);
     }
@@ -613,69 +665,6 @@ export default function AdminDashboard() {
       setLoginError(error instanceof Error ? error.message : "Sign in failed.");
     } finally {
       setBusy(false);
-    }
-  };
-
-  const saveIntegrationSettings = async (event: FormEvent<HTMLFormElement>) => {
-    event.preventDefault();
-    setBusy(true);
-    setIntegrationSettingsError("");
-    setNotice("");
-    try {
-      const payload: {
-        sms_enabled: boolean;
-        email_enabled: boolean;
-        sms_api_key?: string;
-        sms_account_sid?: string;
-        sms_sender_phone: string;
-        email_api_key?: string;
-        email_sender_name: string;
-        email_sender_email: string;
-        clear_sms_api_key: boolean;
-        clear_email_api_key: boolean;
-      } = {
-        sms_enabled: integrationSettings?.sms_enabled ?? false,
-        email_enabled: integrationSettings?.email_enabled ?? false,
-        sms_sender_phone: smsSenderPhone,
-        email_sender_name: integrationSettings?.email_sender_name ?? "",
-        email_sender_email: integrationSettings?.email_sender_email ?? "",
-        clear_sms_api_key: clearSmsApiKey,
-        clear_email_api_key: clearEmailApiKey,
-      };
-      if (smsApiKeyDirty && smsApiKey.trim()) payload.sms_api_key = smsApiKey.trim();
-      if (smsAccountSidDirty && smsAccountSid.trim()) payload.sms_account_sid = smsAccountSid.trim();
-      if (emailApiKeyDirty && emailApiKey.trim()) payload.email_api_key = emailApiKey.trim();
-      const updated = await adminRequest<AdminIntegrationSettings>(
-        "/api/admin/integration-settings",
-        token,
-        { method: "PUT", body: JSON.stringify(payload) },
-      );
-      setIntegrationSettings(updated);
-      if (!updated.sms_api_key_configured) setSmsApiKey("");
-      if (!updated.sms_api_key_configured) setSmsAccountSid("");
-      setSmsSenderPhone(updated.sms_sender_phone);
-      if (!updated.email_api_key_configured) setEmailApiKey("");
-      setSmsApiKeyVisible(false);
-      setEmailApiKeyVisible(false);
-      setSmsApiKeyDirty(false);
-      setSmsAccountSidDirty(false);
-      setEmailApiKeyDirty(false);
-      setClearSmsApiKey(false);
-      setClearEmailApiKey(false);
-      setNotice("API settings saved.");
-    } catch (error) {
-      setIntegrationSettingsError(error instanceof Error ? error.message : "API settings could not be saved.");
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const toggleIntegrationApiKeyVisibility = (channel: "sms" | "email") => {
-    const isVisible = channel === "sms" ? smsApiKeyVisible : emailApiKeyVisible;
-    if (channel === "sms") {
-      setSmsApiKeyVisible(!isVisible);
-    } else {
-      setEmailApiKeyVisible(!isVisible);
     }
   };
 
@@ -712,7 +701,6 @@ export default function AdminDashboard() {
 
   const openAdminManager = async () => {
     setAdminRegistrationError("");
-    setAdminRegistrationNotice("");
     try {
       const result = await adminRequest<AdminAccount[]>("/api/admin/admins", token);
       setAdminAccounts(result);
@@ -726,14 +714,14 @@ export default function AdminDashboard() {
     event.preventDefault();
     setBusy(true);
     setAdminRegistrationError("");
-    setAdminRegistrationNotice("");
     try {
       await registerAdmin(newAdminEmail.trim(), newAdminPassword, { token });
       const updatedAdmins = await adminRequest<AdminAccount[]>("/api/admin/admins", token);
       setAdminAccounts(updatedAdmins);
       setNewAdminEmail("");
       setNewAdminPassword("");
-      setAdminRegistrationNotice("Administrator account created. They can now sign in with their email and password.");
+      setAdminManagerOpen(false);
+      showToast("Administrator account created. They can now sign in with their email and password.", "success");
     } catch (error) {
       setAdminRegistrationError(error instanceof Error ? error.message : "Admin account could not be registered.");
     } finally {
@@ -741,14 +729,23 @@ export default function AdminDashboard() {
     }
   };
 
-  const filteredProducts = useMemo(() => {
+  const filteredRegularProducts = useMemo(() => {
     const needle = search.trim().toLowerCase();
-    if (!needle) return products;
-    return products.filter((product) =>
-      [product.name, product.slug, ...product.categories].join(" ").toLowerCase().includes(needle),
-    );
+    return products.filter((product) => {
+      if (product.is_combo) return false;
+      if (!needle) return true;
+      return [product.name, product.slug, ...product.categories].join(" ").toLowerCase().includes(needle);
+    });
   }, [products, search]);
-  const comboProducts = filteredProducts.filter((product) => product.is_combo);
+  const filteredComboProducts = useMemo(() => {
+    const needle = search.trim().toLowerCase();
+    return products.filter((product) => {
+      if (!product.is_combo) return false;
+      if (!needle) return true;
+      return [product.name, product.slug, ...product.categories].join(" ").toLowerCase().includes(needle);
+    });
+  }, [products, search]);
+  const comboProducts = filteredComboProducts;
   const regularProducts = products.filter((product) => !product.is_combo && product.status === "active");
   const bundleRegularPrice = productEditor
     ? productEditor.combo_catalog_products.reduce((sum, item) => {
@@ -765,7 +762,7 @@ export default function AdminDashboard() {
       .includes(search.toLowerCase());
     return matchesFilter && matchesSearch;
   }), [orders, orderFilter, search]);
-  const activeProducts = section === "campaigns" ? comboProducts : filteredProducts;
+  const activeProducts = section === "campaigns" ? comboProducts : filteredRegularProducts;
   const campaignCombos = products
     .filter((product) => product.is_combo)
     .sort((left, right) => right.id.localeCompare(left.id));
@@ -775,13 +772,13 @@ export default function AdminDashboard() {
   const currentOrdersPage = Math.min(ordersPage, Math.max(1, Math.ceil(filteredOrders.length / ADMIN_PAGE_SIZE)));
   const currentProductsPage = Math.min(productsPage, Math.max(1, Math.ceil(activeProducts.length / ADMIN_PAGE_SIZE)));
   const currentReviewsPage = Math.min(reviewsPage, Math.max(1, Math.ceil(reviews.length / ADMIN_PAGE_SIZE)));
-  const currentCategoriesPage = Math.min(categoriesPage, Math.max(1, Math.ceil(categories.length / ADMIN_PAGE_SIZE)));
+  const currentCategoriesPage = Math.min(categoriesPage, Math.max(1, Math.ceil(categories.length / ADMIN_CATEGORIES_PAGE_SIZE)));
   const currentCampaignCombosPage = Math.min(campaignCombosPage, Math.max(1, Math.ceil(campaignCombos.length / ADMIN_PAGE_SIZE)));
   const currentCampaignOffersPage = Math.min(campaignOffersPage, Math.max(1, Math.ceil(campaignOffers.length / ADMIN_PAGE_SIZE)));
   const visibleOrders = filteredOrders.slice((currentOrdersPage - 1) * ADMIN_PAGE_SIZE, currentOrdersPage * ADMIN_PAGE_SIZE);
   const visibleProducts = activeProducts.slice((currentProductsPage - 1) * ADMIN_PAGE_SIZE, currentProductsPage * ADMIN_PAGE_SIZE);
   const visibleReviews = reviews.slice((currentReviewsPage - 1) * ADMIN_PAGE_SIZE, currentReviewsPage * ADMIN_PAGE_SIZE);
-  const visibleCategories = categories.slice((currentCategoriesPage - 1) * ADMIN_PAGE_SIZE, currentCategoriesPage * ADMIN_PAGE_SIZE);
+  const visibleCategories = categories.slice((currentCategoriesPage - 1) * ADMIN_CATEGORIES_PAGE_SIZE, currentCategoriesPage * ADMIN_CATEGORIES_PAGE_SIZE);
   const visibleCampaignCombos = showAllCampaignCombos
     ? campaignCombos.slice((currentCampaignCombosPage - 1) * ADMIN_PAGE_SIZE, currentCampaignCombosPage * ADMIN_PAGE_SIZE)
     : campaignCombos.slice(0, 6);
@@ -866,7 +863,7 @@ export default function AdminDashboard() {
 
   const openProduct = (product?: AdminProduct, combo = false) => {
     const isCombo = combo || Boolean(product?.is_combo);
-    setSelectedProductImage(null);
+    handleProductImageChange(null);
     setComboCatalogProductToAdd("");
     setProductEditor(
       product
@@ -876,15 +873,15 @@ export default function AdminDashboard() {
             name: product.name,
             slug: product.slug,
             description: product.description,
-            ingredients: product.ingredients.join(", "),
-            categories: product.categories.join(", "),
+            categories: product.categories,
             dish_type: product.dish_type ?? "",
             status: product.status,
-            price: String(product.price),
-            mrp: String(product.mrp),
+            price: String(product.price ?? product.variants[0]?.price ?? ""),
+            mrp: String(product.mrp ?? product.variants[0]?.mrp ?? ""),
             spice_level: product.spice_level,
-            image_url: product.images.map((image) => image.object_key ?? image.url).join("\n"),
+            images: product.images,
             variants: product.variants.map((variant) => ({
+              id: variant.id,
               pack_size: variant.pack_size,
               price: String(variant.price),
               mrp: String(variant.mrp),
@@ -904,16 +901,15 @@ export default function AdminDashboard() {
             name: "",
             slug: "",
             description: "",
-            ingredients: "",
             categories: combo
-              ? categories.find((category) => /combo|pack/i.test(`${category.slug} ${category.name}`))?.slug ?? "combos-packs"
-              : "",
+              ? [categories.find((category) => /combo|pack/i.test(`${category.slug} ${category.name}`))?.slug ?? "combos-packs"]
+              : [],
             dish_type: "",
             status: "active",
             price: "",
             mrp: "",
             spice_level: "mild",
-            image_url: "",
+            images: [],
             variants: isCombo ? [] : [{ pack_size: "", price: "", mrp: "", sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }],
             combo_catalog_products: [],
           },
@@ -924,6 +920,15 @@ export default function AdminDashboard() {
     event.preventDefault();
     if (!productEditor) return;
     const editor = productEditor;
+    const packVariants = editor.variants.filter((variant) => variant.pack_size.trim());
+    if (!editor.is_combo && !packVariants.length) {
+      setNotice("Add at least one pack size before saving this product.");
+      return;
+    }
+    if (!editor.is_combo && !editor.categories.length) {
+      setNotice("Choose at least one product category from the dropdown.");
+      return;
+    }
     if (editor.is_combo && (
       !editor.combo_catalog_products.length
       || roundedBundleRegularPrice <= Number(editor.price)
@@ -936,29 +941,38 @@ export default function AdminDashboard() {
     const url = editor.id ? `/api/admin/${resource}/${editor.id}` : `/api/admin/${resource}`;
     const saved = await runAction(
       async () => {
-        const images = editor.image_url.split(/\r?\n/).map((imageUrl) => imageUrl.trim()).filter(Boolean);
+        const images = editor.images.map((image) => image.object_key ?? image.url);
         const productId = editor.id ?? crypto.randomUUID();
         if (selectedProductImage) {
-          const result = await uploadProductImage(selectedProductImage, productId);
+          const result = await uploadProductImage(selectedProductImage, productId, {
+            section: editor.is_combo ? "combos" : "products",
+            name: editor.slug.trim() || editor.name.trim() || productId,
+          });
           if (images.length) images[0] = result.object_key;
           else images.unshift(result.object_key);
         }
 
         const payload = {
           id: productId,
-          is_combo: editor.is_combo,
           name: editor.name.trim(),
           slug: editor.slug.trim(),
           description: editor.description.trim(),
-          ingredients: editor.is_combo ? [] : editor.ingredients.split(",").map((value) => value.trim()).filter(Boolean),
-          categories: editor.categories.split(",").map((value) => value.trim()).filter(Boolean),
-          dish_type: editor.dish_type.trim() || null,
+          categories: editor.categories,
           status: editor.status,
           spice_level: editor.spice_level,
-          price: Number(editor.price),
-          mrp: editor.is_combo ? roundedBundleRegularPrice : Number(editor.mrp),
+          ...(editor.is_combo ? {
+            price: Number(editor.price),
+            mrp: roundedBundleRegularPrice,
+            dish_type: editor.dish_type.trim() || null,
+            combo_catalog_products: editor.combo_catalog_products.map((item) => ({
+              product_id: item.product_id,
+              variant_id: item.variant_id,
+              quantity: Number(item.quantity),
+            })),
+          } : {}),
           images,
-          variants: editor.is_combo ? [] : editor.variants.filter((variant) => variant.pack_size.trim()).map((variant) => ({
+          variants: editor.is_combo ? [] : packVariants.map((variant) => ({
+            ...(variant.id ? { id: variant.id } : {}),
             pack_size: variant.pack_size.trim(),
             price: Number(variant.price),
             mrp: Number(variant.mrp),
@@ -967,11 +981,6 @@ export default function AdminDashboard() {
             batch_no: variant.batch_no.trim() || null,
             expiry_date: variant.expiry_date || null,
           })),
-          combo_catalog_products: editor.is_combo ? editor.combo_catalog_products.map((item) => ({
-            product_id: item.product_id,
-            variant_id: item.variant_id,
-            quantity: Number(item.quantity),
-          })) : [],
         };
         await adminRequest(url, token, { method, body: JSON.stringify(payload) });
       },
@@ -979,28 +988,42 @@ export default function AdminDashboard() {
     );
     if (saved) {
       setProductEditor(null);
-      setSelectedProductImage(null);
+      handleProductImageChange(null);
     }
   };
 
   const saveCategory = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const form = new FormData(event.currentTarget);
-    const id = categoryEditor && categoryEditor !== "new" ? categoryEditor.id : undefined;
-    const body = {
-      name: String(form.get("name") ?? "").trim(),
-      slug: String(form.get("slug") ?? "").trim(),
-      type: String(form.get("type") ?? "product_type"),
-      description: String(form.get("description") ?? "").trim() || null,
-    };
+    if (!categoryEditor) return;
+    const editor = categoryEditor;
+    const id = editor !== "new" ? editor.id : undefined;
+    const slug = String(form.get("slug") ?? "").trim();
     const saved = await runAction(
-      () => adminRequest(id ? `/api/admin/categories/${id}` : "/api/admin/categories", token, {
-        method: id ? "PUT" : "POST",
-        body: JSON.stringify(body),
-      }),
+      async () => {
+        let imageKey = editor !== "new" ? editor.image_key ?? null : null;
+        if (categoryImageFile) {
+          const uploaded = await uploadHomepageMedia(categoryImageFile, token, "collections", slug);
+          imageKey = uploaded.image_key;
+        }
+        const body = {
+          name: String(form.get("name") ?? "").trim(),
+          slug,
+          type: String(form.get("type") ?? "product_type"),
+          description: String(form.get("description") ?? "").trim() || null,
+          image_key: imageKey,
+        };
+        await adminRequest(id ? `/api/admin/categories/${id}` : "/api/admin/categories", token, {
+          method: id ? "PUT" : "POST",
+          body: JSON.stringify(body),
+        });
+      },
       id ? "Category updated." : "Category created.",
     );
-    if (saved) setCategoryEditor(null);
+    if (saved) {
+      setCategoryEditor(null);
+      setCategoryImageFile(null);
+    }
   };
 
   const removeCategory = async (category: AdminCategory) => {
@@ -1092,7 +1115,7 @@ export default function AdminDashboard() {
           : updated.email_notification_status === "sent"
             ? " A status update email was sent to the customer."
             : "";
-      setNotice(`Order changes saved.${mailNotice}`);
+      showToast(`Order changes saved.${mailNotice}`, "success");
       setActiveOrder(null);
       await refresh(true);
     } catch (error) {
@@ -1147,8 +1170,8 @@ export default function AdminDashboard() {
   });
 
   return (
-    <div className="min-h-[80vh] bg-[#f7f3ec] text-ink-900 md:grid md:grid-cols-[250px_minmax(0,1fr)]">
-      <aside className="border-b border-paper-200 bg-[#302016] text-paper-100 md:flex md:min-h-[calc(100vh-1rem)] md:flex-col md:border-b-0 md:border-r md:px-4 md:py-6">
+    <div className="min-h-screen bg-[#f7f3ec] text-ink-900 md:grid md:grid-cols-[250px_minmax(0,1fr)]">
+      <aside className="border-b border-paper-200 bg-[#302016] text-paper-100 md:sticky md:top-0 md:flex md:h-screen md:min-h-0 md:self-start md:flex-col md:border-b-0 md:border-r md:px-4 md:py-6">
         <div className="flex items-center justify-between gap-4 px-4 py-4 md:px-2 md:py-1">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-2xl bg-saffron-400/15 text-saffron-300">
@@ -1163,7 +1186,7 @@ export default function AdminDashboard() {
             Sign out
           </button>
         </div>
-        <nav aria-label="Admin sections" className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 md:mt-9 md:block md:space-y-1 md:overflow-visible md:px-0">
+        <nav aria-label="Admin sections" className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 md:mt-9 md:block md:flex-1 md:space-y-1 md:overflow-y-auto md:overflow-x-hidden md:px-0">
           {NAV.map(({ id, label, Icon }) => (
             <button
               key={id}
@@ -1282,7 +1305,7 @@ export default function AdminDashboard() {
             {filteredOrders.length ? (
               <Pagination
                 page={currentOrdersPage}
-                pageSize={ADMIN_PAGE_SIZE}
+                pageSize={ADMIN_CATEGORIES_PAGE_SIZE}
                 total={filteredOrders.length}
                 onPageChange={setOrdersPage}
               />
@@ -1294,7 +1317,7 @@ export default function AdminDashboard() {
           <section className="mt-7">
             <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <p className="text-sm text-ink-500">
-                {products.length} products in catalog · stock and batch details are managed per pack size.
+                {filteredRegularProducts.length} regular products in catalog · stock and batch details are managed per pack size.
               </p>
               <div className="flex flex-col gap-2 sm:flex-row">
                 <label className="relative block">
@@ -1427,12 +1450,15 @@ export default function AdminDashboard() {
           <section className="mt-7">
             <div className="mb-4 flex items-center justify-between gap-3">
               <p className="text-sm text-ink-500">Organize product types, regions, dishes and collections.</p>
-              <button type="button" className={primaryButton} onClick={() => setCategoryEditor("new")}><PlusIcon className="size-4" />Add category</button>
+              <button type="button" className={primaryButton} onClick={() => { setCategoryImageFile(null); setCategoryEditor("new"); }}><PlusIcon className="size-4" />Add category</button>
             </div>
             {categories.length ? (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {visibleCategories.map((category) => (
                   <article key={category.id} className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
+                    {category.image_url ? (
+                      <SmartImage src={category.image_url} alt={category.name} aspect="aspect-[16/7]" sizes="(max-width: 640px) 100vw, 33vw" wrapperClassName="mb-4 rounded-xl" zoom={false} />
+                    ) : null}
                     <div className="flex items-start justify-between gap-3">
                       <div>
                         <h2 className="font-display text-lg font-semibold text-ink-950">{category.name}</h2>
@@ -1442,7 +1468,7 @@ export default function AdminDashboard() {
                     </div>
                     {category.description ? <p className="mt-3 text-sm text-ink-600">{category.description}</p> : null}
                     <div className="mt-4 flex gap-2">
-                      <button type="button" className={secondaryButton} onClick={() => setCategoryEditor(category)}>Edit</button>
+                      <button type="button" className={secondaryButton} onClick={() => { setCategoryImageFile(null); setCategoryEditor(category); }}>Edit</button>
                       <button type="button" className="rounded-xl p-2.5 text-chili-600 hover:bg-chili-50" aria-label={`Delete ${category.name}`} onClick={() => void removeCategory(category)}><TrashIcon className="size-4" /></button>
                     </div>
                   </article>
@@ -1547,10 +1573,9 @@ export default function AdminDashboard() {
 
         {section === "analytics" ? <Analytics analytics={analytics} /> : null}
         {section === "api" ? (
-          <form onSubmit={saveIntegrationSettings} className="mt-7 max-w-4xl space-y-5">
+          <section className="mt-7 max-w-4xl space-y-5">
             <div className="rounded-2xl border border-saffron-200 bg-saffron-50 p-4 text-sm leading-relaxed text-ink-700">
-              Saved provider credentials remain in their fields as masked dots after refresh. Use the eye button to reveal or hide a secret. Keep your screen private while it is visible.
-              Order confirmation emails use Brevo transactional email. Add a Brevo API v3 key and a verified sender identity before enabling email.
+              Manage notification providers here. Provider keys are stored as plain text in the database; only admins can access this settings page. Keys are masked until revealed.
             </div>
             {integrationSettingsError ? (
               <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 px-4 py-3 text-sm text-chili-700">{integrationSettingsError}</p>
@@ -1559,180 +1584,173 @@ export default function AdminDashboard() {
               <p role="status" className="text-sm text-ink-500">Loading integration settings…</p>
             ) : null}
             {integrationSettings ? (
-              <>
-                <section className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h2 className="font-display text-xl font-semibold text-ink-950">SMS</h2>
-                      <p className="mt-1 text-sm text-ink-500">Send order confirmations through Twilio Programmable Messaging.</p>
+              <form className="space-y-5" onSubmit={saveNotificationSettings}>
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <section className="space-y-4 rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
+                    <div className="flex items-center justify-between gap-4">
+                      <h2 className="font-display text-xl font-semibold text-ink-950">Twilio SMS</h2>
+                      <label className="flex items-center gap-2 text-sm font-medium text-ink-700">
+                        <input
+                          type="checkbox"
+                          checked={notificationDraft.sms_enabled}
+                          onChange={(event) => setNotificationDraft((draft) => ({ ...draft, sms_enabled: event.target.checked }))}
+                        />
+                        Enabled
+                      </label>
                     </div>
-                    <label className="inline-flex items-center gap-2 text-sm font-semibold text-ink-700">
+                    <p className="text-sm text-ink-600">
+                      Credentials: {integrationSettings.sms_configured ? "Configured" : "Incomplete"}
+                    </p>
+                    <label className={labelClass} htmlFor="twilio-account-sid">
+                      Account SID
                       <input
-                        type="checkbox"
-                        checked={integrationSettings.sms_enabled}
-                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, sms_enabled: event.target.checked })}
-                        className="size-4 accent-[#bd4b16]"
-                      />
-                      Enabled
-                    </label>
-                  </div>
-                  <div className="mt-5">
-                    <label className={labelClass} htmlFor="twilio-account-sid">Twilio Account SID</label>
-                    <input
-                      id="twilio-account-sid"
-                      type="text"
-                      autoComplete="off"
-                      className={fieldClass}
-                      placeholder="AC followed by 32 characters"
-                      value={smsAccountSid}
-                      onChange={(event) => {
-                        setSmsAccountSid(event.target.value);
-                        setSmsAccountSidDirty(true);
-                        setClearSmsApiKey(false);
-                      }}
-                    />
-                  </div>
-                  <div className="mt-4">
-                    <label className={labelClass} htmlFor="sms-api-key">Twilio Auth Token</label>
-                    <div className="mt-1.5 flex gap-2">
-                      <input
-                        id="sms-api-key"
-                        type={smsApiKeyVisible ? "text" : "password"}
-                        autoComplete="new-password"
-                        className={`${fieldClass} mt-0 min-w-0 flex-1`}
-                        placeholder={integrationSettings.sms_api_key_configured ? "" : "Enter Twilio Auth Token"}
-                        value={smsApiKey}
-                        onChange={(event) => {
-                          setSmsApiKey(event.target.value);
-                          setSmsApiKeyDirty(true);
-                          setClearSmsApiKey(false);
-                        }}
-                      />
-                      {integrationSettings.sms_api_key_configured ? (
-                        <button
-                          type="button"
-                          className={secondaryButton}
-                          onClick={() => toggleIntegrationApiKeyVisibility("sms")}
-                          aria-label={smsApiKeyVisible ? "Hide Twilio Auth Token" : "Show Twilio Auth Token"}
-                          title={smsApiKeyVisible ? "Hide Auth Token" : "Show Auth Token"}
-                        >
-                          {smsApiKeyVisible ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                  <label className={`${labelClass} mt-4 block`}>
-                    Twilio sender phone number (E.164)
-                    <input
-                      type="tel"
-                      autoComplete="off"
-                      className={fieldClass}
-                      placeholder="+14155550123"
-                      value={smsSenderPhone}
-                      onChange={(event) => {
-                        setSmsSenderPhone(event.target.value);
-                        setClearSmsApiKey(false);
-                      }}
-                    />
-                  </label>
-                  <p className="mt-2 text-xs leading-relaxed text-ink-500">
-                    Use a Twilio number enabled for SMS on your account. Confirm Twilio supports messaging to your customers&apos; destinations.
-                  </p>
-                  {integrationSettings.sms_api_key_configured ? (
-                    <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-chili-700">
-                      <input type="checkbox" checked={clearSmsApiKey} onChange={(event) => setClearSmsApiKey(event.target.checked)} className="size-4 accent-[#bd4b16]" />
-                      Remove saved Twilio credentials
-                    </label>
-                  ) : null}
-                </section>
-                <section className="rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
-                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                    <div>
-                      <h2 className="font-display text-xl font-semibold text-ink-950">Email</h2>
-                      <p className="mt-1 text-sm text-ink-500">Send order confirmations through the Brevo transactional email API.</p>
-                    </div>
-                    <label className="inline-flex items-center gap-2 text-sm font-semibold text-ink-700">
-                      <input
-                        type="checkbox"
-                        checked={integrationSettings.email_enabled}
-                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, email_enabled: event.target.checked })}
-                        className="size-4 accent-[#bd4b16]"
-                      />
-                      Enabled
-                    </label>
-                  </div>
-                  <div className="mt-5">
-                    <label className={labelClass} htmlFor="email-api-key">Brevo API v3 key</label>
-                    <div className="mt-1.5 flex gap-2">
-                      <input
-                        id="email-api-key"
-                        type={emailApiKeyVisible ? "text" : "password"}
-                        autoComplete="new-password"
-                        className={`${fieldClass} mt-0 min-w-0 flex-1`}
-                        placeholder={integrationSettings.email_api_key_configured ? "" : "Enter API key"}
-                        value={emailApiKey}
-                        onChange={(event) => {
-                          setEmailApiKey(event.target.value);
-                          setEmailApiKeyDirty(true);
-                          setClearEmailApiKey(false);
-                        }}
-                      />
-                      {integrationSettings.email_api_key_configured ? (
-                        <button
-                          type="button"
-                          className={secondaryButton}
-                          onClick={() => toggleIntegrationApiKeyVisibility("email")}
-                          aria-label={emailApiKeyVisible ? "Hide email API key" : "Show email API key"}
-                          title={emailApiKeyVisible ? "Hide API key" : "Show API key"}
-                        >
-                          {emailApiKeyVisible ? <EyeOffIcon className="size-4" /> : <EyeIcon className="size-4" />}
-                        </button>
-                      ) : null}
-                    </div>
-                  </div>
-                  <div className="mt-4 grid gap-4 sm:grid-cols-2">
-                    <label className={labelClass}>
-                      Verified sender name
-                      <input
-                        type="text"
-                        autoComplete="organization"
-                        maxLength={120}
-                        required={integrationSettings.email_enabled}
+                        id="twilio-account-sid"
                         className={fieldClass}
-                        placeholder="Masala House"
-                        value={integrationSettings.email_sender_name ?? ""}
-                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, email_sender_name: event.target.value })}
+                        value={notificationDraft.sms_account_sid}
+                        onChange={(event) => setNotificationDraft((draft) => ({ ...draft, sms_account_sid: event.target.value }))}
+                        autoComplete="off"
                       />
                     </label>
-                    <label className={labelClass}>
-                      Verified sender email
+                    <div>
+                      <label className={labelClass} htmlFor="twilio-auth-token">Auth token</label>
+                      <div className="relative">
+                        <input
+                          id="twilio-auth-token"
+                          type="text"
+                          autoComplete="off"
+                          className={`${fieldClass} pr-12`}
+                          value={showSmsAuthToken || !smsAuthTokenDraft ? smsAuthTokenDraft : "***"}
+                          readOnly={!showSmsAuthToken && Boolean(smsAuthTokenDraft)}
+                          onChange={(event) => {
+                            setSmsAuthTokenDraft(event.target.value);
+                            setShowSmsAuthToken(true);
+                          }}
+                          placeholder="Enter Twilio auth token"
+                        />
+                        {smsAuthTokenDraft ? (
+                          <button
+                            type="button"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-ink-500 hover:text-ink-900"
+                            onClick={() => setShowSmsAuthToken((visible) => !visible)}
+                            aria-label={showSmsAuthToken ? "Hide Twilio auth token" : "Show Twilio auth token"}
+                            title={showSmsAuthToken ? "Hide key" : "Show key"}
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                              {showSmsAuthToken ? (
+                                <>
+                                  <path d="M3 3l18 18" />
+                                  <path d="M10.6 10.6a2 2 0 002.8 2.8" />
+                                  <path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 9 4 10 7a10.8 10.8 0 01-2.6 3.6" />
+                                  <path d="M6.2 6.2C3.9 7.5 2.4 9.5 2 12c1 3 5 7 10 7 1.3 0 2.5-.3 3.6-.8" />
+                                </>
+                              ) : (
+                                <>
+                                  <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </>
+                              )}
+                            </svg>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <label className={labelClass} htmlFor="twilio-sender-phone">
+                      Sender phone
                       <input
+                        id="twilio-sender-phone"
+                        className={fieldClass}
+                        value={notificationDraft.sms_sender_phone}
+                        onChange={(event) => setNotificationDraft((draft) => ({ ...draft, sms_sender_phone: event.target.value }))}
+                        placeholder="+14155550123"
+                      />
+                    </label>
+                  </section>
+
+                  <section className="space-y-4 rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
+                    <div className="flex items-center justify-between gap-4">
+                      <h2 className="font-display text-xl font-semibold text-ink-950">Brevo email</h2>
+                      <label className="flex items-center gap-2 text-sm font-medium text-ink-700">
+                        <input
+                          type="checkbox"
+                          checked={notificationDraft.email_enabled}
+                          onChange={(event) => setNotificationDraft((draft) => ({ ...draft, email_enabled: event.target.checked }))}
+                        />
+                        Enabled
+                      </label>
+                    </div>
+                    <p className="text-sm text-ink-600">
+                      Credentials: {integrationSettings.email_configured ? "Configured" : "Incomplete"}
+                    </p>
+                    <div>
+                      <label className={labelClass} htmlFor="brevo-api-key">API key</label>
+                      <div className="relative">
+                        <input
+                          id="brevo-api-key"
+                          type="text"
+                          autoComplete="off"
+                          className={`${fieldClass} pr-12`}
+                          value={showEmailApiKey || !emailApiKeyDraft ? emailApiKeyDraft : "***"}
+                          readOnly={!showEmailApiKey && Boolean(emailApiKeyDraft)}
+                          onChange={(event) => {
+                            setEmailApiKeyDraft(event.target.value);
+                            setShowEmailApiKey(true);
+                          }}
+                          placeholder="Enter Brevo API key"
+                        />
+                        {emailApiKeyDraft ? (
+                          <button
+                            type="button"
+                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-ink-500 hover:text-ink-900"
+                            onClick={() => setShowEmailApiKey((visible) => !visible)}
+                            aria-label={showEmailApiKey ? "Hide Brevo API key" : "Show Brevo API key"}
+                            title={showEmailApiKey ? "Hide key" : "Show key"}
+                          >
+                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
+                              {showEmailApiKey ? (
+                                <>
+                                  <path d="M3 3l18 18" />
+                                  <path d="M10.6 10.6a2 2 0 002.8 2.8" />
+                                  <path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 9 4 10 7a10.8 10.8 0 01-2.6 3.6" />
+                                  <path d="M6.2 6.2C3.9 7.5 2.4 9.5 2 12c1 3 5 7 10 7 1.3 0 2.5-.3 3.6-.8" />
+                                </>
+                              ) : (
+                                <>
+                                  <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
+                                  <circle cx="12" cy="12" r="3" />
+                                </>
+                              )}
+                            </svg>
+                          </button>
+                        ) : null}
+                      </div>
+                    </div>
+                    <label className={labelClass} htmlFor="brevo-sender-name">
+                      Sender name
+                      <input
+                        id="brevo-sender-name"
+                        className={fieldClass}
+                        value={notificationDraft.email_sender_name}
+                        onChange={(event) => setNotificationDraft((draft) => ({ ...draft, email_sender_name: event.target.value }))}
+                      />
+                    </label>
+                    <label className={labelClass} htmlFor="brevo-sender-email">
+                      Sender email
+                      <input
+                        id="brevo-sender-email"
                         type="email"
-                        autoComplete="email"
-                        maxLength={254}
-                        required={integrationSettings.email_enabled}
                         className={fieldClass}
-                        placeholder="orders@example.com"
-                        value={integrationSettings.email_sender_email ?? ""}
-                        onChange={(event) => setIntegrationSettings({ ...integrationSettings, email_sender_email: event.target.value })}
+                        value={notificationDraft.email_sender_email}
+                        onChange={(event) => setNotificationDraft((draft) => ({ ...draft, email_sender_email: event.target.value }))}
                       />
                     </label>
-                  </div>
-                  {integrationSettings.email_api_key_configured ? (
-                    <label className="mt-3 inline-flex items-center gap-2 text-xs font-medium text-chili-700">
-                      <input type="checkbox" checked={clearEmailApiKey} onChange={(event) => setClearEmailApiKey(event.target.checked)} className="size-4 accent-[#bd4b16]" />
-                      Remove saved email API key
-                    </label>
-                  ) : null}
-                </section>
-                <div className="flex justify-end">
-                  <button type="submit" className={primaryButton} disabled={busy}>
-                    {busy ? "Saving…" : "Save API settings"}
-                  </button>
+                  </section>
                 </div>
-              </>
+                <button className={primaryButton} type="submit" disabled={busy}>
+                  {busy ? "Saving…" : "Save notification settings"}
+                </button>
+              </form>
             ) : null}
-          </form>
+          </section>
         ) : null}
       </div>
 
@@ -1749,10 +1767,54 @@ export default function AdminDashboard() {
                 </>
               ) : (
                 <>
-                  <label className={labelClass}>Price (₹)<input required type="number" min="0" step="0.01" className={fieldClass} value={productEditor.price} onChange={(event) => setProductEditor({ ...productEditor, price: event.target.value })} /></label>
-                  <label className={labelClass}>MRP (₹)<input required type="number" min="0" step="0.01" className={fieldClass} value={productEditor.mrp} onChange={(event) => setProductEditor({ ...productEditor, mrp: event.target.value })} /></label>
-                  <label className={labelClass}>Categories<input className={fieldClass} placeholder="Whole Spices, Breakfast Masalas" value={productEditor.categories} onChange={(event) => setProductEditor({ ...productEditor, categories: event.target.value })} /></label>
-                  <label className={labelClass}>Dish type<input className={fieldClass} placeholder="Sambar, biryani…" value={productEditor.dish_type} onChange={(event) => setProductEditor({ ...productEditor, dish_type: event.target.value })} /></label>
+                  <div className={labelClass}>
+                    <label htmlFor="product-category">Categories</label>
+                    <SelectField
+                      id="product-category"
+                      value=""
+                      onChange={(event) => {
+                        const slug = event.target.value;
+                        if (slug && !productEditor.categories.includes(slug)) {
+                          setProductEditor({
+                            ...productEditor,
+                            categories: [...productEditor.categories, slug],
+                          });
+                        }
+                      }}
+                    >
+                      <option value="">Choose a category…</option>
+                      {categories
+                        .filter((category) => !productEditor.categories.includes(category.slug))
+                        .map((category) => (
+                          <option key={category.id} value={category.slug}>{category.name}</option>
+                        ))}
+                    </SelectField>
+                    {productEditor.categories.length ? (
+                      <ul className="mt-2 flex flex-wrap gap-2">
+                        {productEditor.categories.map((slug) => {
+                          const category = categories.find((item) => item.slug === slug);
+                          return (
+                            <li key={slug}>
+                              <button
+                                type="button"
+                                className="inline-flex items-center gap-1 rounded-full border border-masala-200 bg-masala-50 px-3 py-1 text-xs font-semibold text-masala-800"
+                                aria-label={`Remove ${category?.name ?? slug} category`}
+                                onClick={() => setProductEditor({
+                                  ...productEditor,
+                                  categories: productEditor.categories.filter((item) => item !== slug),
+                                })}
+                              >
+                                {category?.name ?? slug}<span aria-hidden="true">×</span>
+                              </button>
+                            </li>
+                          );
+                        })}
+                      </ul>
+                    ) : null}
+                    {!categories.length ? (
+                      <p className="mt-1 text-xs font-medium text-chili-700">No categories are available. Add a category before assigning one to a product.</p>
+                    ) : null}
+                  </div>
                   <label className={labelClass}>Spice level<SelectField value={productEditor.spice_level} onChange={(event) => setProductEditor({ ...productEditor, spice_level: event.target.value })}><option value="mild">Mild</option><option value="medium">Medium</option><option value="hot">Hot</option></SelectField></label>
                 </>
               )}
@@ -1844,18 +1906,17 @@ export default function AdminDashboard() {
                 title="Product image"
                 hint="Select an image to use as the product's main image."
                 file={selectedProductImage}
+                previewSrc={selectedProductImagePreview ?? productEditor.images[0]?.url}
                 className="sm:col-span-2"
-                onChange={setSelectedProductImage}
+                onChange={handleProductImageChange}
               />
-              <label className={`${labelClass} sm:col-span-2`}>Additional image URLs (one per line)<textarea rows={2} className={fieldClass} placeholder={"https://…/front.webp\nhttps://…/back.webp"} value={productEditor.image_url} onChange={(event) => setProductEditor({ ...productEditor, image_url: event.target.value })} /></label>
-              <label className={`${labelClass} sm:col-span-2`}>Description<textarea required rows={3} className={fieldClass} value={productEditor.description} onChange={(event) => setProductEditor({ ...productEditor, description: event.target.value })} /></label>
-              {!productEditor.is_combo ? <label className={`${labelClass} sm:col-span-2`}>Ingredients (comma-separated)<input className={fieldClass} value={productEditor.ingredients} onChange={(event) => setProductEditor({ ...productEditor, ingredients: event.target.value })} /></label> : null}
+              <label className={`${labelClass} sm:col-span-2`}>Description<textarea rows={3} className={fieldClass} value={productEditor.description} onChange={(event) => setProductEditor({ ...productEditor, description: event.target.value })} /></label>
             </div>
             {!productEditor.is_combo ? (
               <div>
               <div className="mb-3 flex items-center justify-between gap-3">
                 <div><h3 className="font-semibold text-ink-900">Pack sizes, inventory & batch</h3><p className="text-xs text-ink-500">Add SKU, stock quantity, batch number and expiry date per variant.</p></div>
-                <button type="button" className={secondaryButton} onClick={() => setProductEditor({ ...productEditor, variants: [...productEditor.variants, { pack_size: "", price: productEditor.price, mrp: productEditor.mrp, sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }] })}><PlusIcon className="size-4" />Add pack</button>
+                <button type="button" className={secondaryButton} onClick={() => setProductEditor({ ...productEditor, variants: [...productEditor.variants, { pack_size: "", price: "", mrp: "", sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }] })}><PlusIcon className="size-4" />Add pack</button>
               </div>
               <div className="space-y-3">
                 {productEditor.variants.map((variant, index) => (
@@ -1886,13 +1947,20 @@ export default function AdminDashboard() {
       ) : null}
 
       {categoryEditor ? (
-        <Modal title={categoryEditor === "new" ? "Add category" : "Edit category"} onClose={() => setCategoryEditor(null)}>
+        <Modal title={categoryEditor === "new" ? "Add category" : "Edit category"} onClose={() => { setCategoryEditor(null); setCategoryImageFile(null); }}>
           <form onSubmit={saveCategory} className="space-y-4">
             <label className={labelClass}>Name<input name="name" required defaultValue={categoryEditor === "new" ? "" : categoryEditor.name} className={fieldClass} /></label>
             <label className={labelClass}>Slug<input name="slug" required defaultValue={categoryEditor === "new" ? "" : categoryEditor.slug} className={fieldClass} /></label>
             <label className={labelClass}>Category type<SelectField name="type" defaultValue={categoryEditor === "new" ? "product_type" : categoryEditor.type}><option value="product_type">Product type</option><option value="region">Region</option><option value="dish">Dish</option><option value="collection">Collection</option></SelectField></label>
             <label className={labelClass}>Description<textarea name="description" rows={3} defaultValue={categoryEditor === "new" ? "" : categoryEditor.description ?? ""} className={fieldClass} /></label>
-            <div className="flex justify-end gap-2"><button type="button" className={secondaryButton} onClick={() => setCategoryEditor(null)}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save category</button></div>
+            <label className={labelClass}>Collection image (stored in RustFS)
+              <input type="file" accept="image/*" className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5`} onChange={(event) => setCategoryImageFile(event.currentTarget.files?.[0] ?? null)} />
+              {categoryImageFile ? <span className="mt-1 block text-xs text-ink-500">{categoryImageFile.name} will be used for this collection.</span> : categoryEditor !== "new" && categoryEditor.image_key ? <span className="mt-1 block text-xs text-ink-500">Leave empty to keep the current image.</span> : null}
+            </label>
+            {categoryEditor !== "new" && categoryEditor.image_url && !categoryImageFile ? (
+              <SmartImage src={categoryEditor.image_url} alt={categoryEditor.name} aspect="aspect-[16/7]" sizes="(max-width: 640px) 100vw, 50vw" wrapperClassName="rounded-xl" zoom={false} />
+            ) : null}
+            <div className="flex justify-end gap-2"><button type="button" className={secondaryButton} onClick={() => { setCategoryEditor(null); setCategoryImageFile(null); }}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save category</button></div>
           </form>
         </Modal>
       ) : null}
@@ -2040,7 +2108,6 @@ export default function AdminDashboard() {
             <label className={labelClass}>Email address<input type="email" autoComplete="email" required className={fieldClass} value={newAdminEmail} onChange={(event) => setNewAdminEmail(event.target.value)} /></label>
             <label className={labelClass}>Temporary password<input type="password" autoComplete="new-password" minLength={12} maxLength={128} required className={fieldClass} value={newAdminPassword} onChange={(event) => setNewAdminPassword(event.target.value)} /></label>
             {adminRegistrationError ? <p role="alert" className="text-sm text-chili-700">{adminRegistrationError}</p> : null}
-            {adminRegistrationNotice ? <p role="status" className="text-sm text-cardamom-700">{adminRegistrationNotice}</p> : null}
             <div className="flex justify-end gap-2">
               <button type="button" className={secondaryButton} onClick={() => setAdminManagerOpen(false)}>Close</button>
               <button type="submit" className={primaryButton} disabled={busy}>{busy ? "Registering…" : "Register admin"}</button>
@@ -2185,7 +2252,7 @@ function ProductsTable({
                   <td className="px-4 py-3.5 text-ink-600">{product.categories.join(", ") || "—"}</td>
                   <td className="px-4 py-3.5 text-ink-600">{product.variants.length}</td>
                   <td className={`px-4 py-3.5 font-semibold ${stock <= 5 ? "text-chili-700" : "text-ink-700"}`}>{stock} units</td>
-                  <td className="px-4 py-3.5 font-semibold">{amount(product.price)}</td>
+                  <td className="px-4 py-3.5 font-semibold">{amount(getStartingPrice(product))}</td>
                   <td className="px-4 py-3.5"><span className={statusBadgeClass}>{displayStatus(product.status)}</span></td>
                   <td className="px-4 py-3.5"><div className="flex items-center gap-2"><button type="button" className="text-sm font-semibold text-masala-700 hover:underline" onClick={() => onEdit(product)}>Edit</button><button type="button" className="rounded-lg p-1.5 text-chili-600 hover:bg-chili-50" aria-label={`Delete ${product.name}`} onClick={() => onDelete(product)}><TrashIcon className="size-4" /></button></div></td>
                 </tr>

@@ -5,10 +5,10 @@ import logging
 from typing import Any, Literal
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.exc import SQLAlchemyError
 
-from app.core.database import notification_settings_table
+from app.core.database import session_factory
+from app.modules.notifications.settings import get_notification_settings
 
 logger = logging.getLogger(__name__)
 
@@ -56,10 +56,9 @@ def _order_confirmation_html(order: dict[str, Any]) -> str:
 
 
 async def send_order_confirmation_email(
-    db: AsyncSession,
     order: dict[str, Any],
 ) -> EmailDeliveryStatus:
-    return await send_order_status_email(db, order, "placed")
+    return await send_order_status_email(order, "placed")
 
 
 def _order_status_email_html(
@@ -104,13 +103,11 @@ def _order_status_email_html(
 
 
 async def send_order_status_email(
-    db: AsyncSession,
     order: dict[str, Any],
     status: OrderEmailStatus,
 ) -> EmailDeliveryStatus:
     customer_name = order.get("customer_name") or ""
     return await _send_transactional_email(
-        db,
         recipient=str(order["email"]),
         recipient_name=str(customer_name),
         subject=f"Order {order['order_number']} — {status.title()}",
@@ -156,11 +153,9 @@ def _brevo_error_details(
 
 
 async def send_newsletter_signup_email(
-    db: AsyncSession,
     email: str,
 ) -> NewsletterEmailStatus:
     return await _send_transactional_email(
-        db,
         recipient=email,
         recipient_name="Newsletter subscriber",
         subject="You’re on the Masala House list",
@@ -170,7 +165,6 @@ async def send_newsletter_signup_email(
 
 
 async def _send_transactional_email(
-    db: AsyncSession,
     *,
     recipient: str,
     recipient_name: str,
@@ -178,20 +172,22 @@ async def _send_transactional_email(
     html_content: str,
     description: str,
 ) -> EmailDeliveryStatus:
-    result = await db.execute(
-        select(notification_settings_table).limit(1)
-    )
-    settings = result.mappings().first()
-    if settings is None or not settings["email_enabled"]:
+    try:
+        async with session_factory() as db:
+            settings = await get_notification_settings(db)
+    except SQLAlchemyError:
+        logger.exception("Brevo %s could not load notification settings.", description)
+        return "failed"
+    if not settings.email_enabled:
         logger.warning(
             "Brevo %s was not attempted because email integration is disabled.",
             description,
         )
         return "disabled"
 
-    api_key = settings["email_api_key"]
-    sender_name = settings["email_sender_name"]
-    sender_email = settings["email_sender_email"]
+    api_key = settings.email_api_key
+    sender_name = settings.email_sender_name
+    sender_email = settings.email_sender_email
     if not api_key or not sender_name or not sender_email:
         logger.error(
             "Brevo %s was not attempted because its configuration is incomplete "

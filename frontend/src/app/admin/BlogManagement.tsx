@@ -26,7 +26,11 @@ type AdminBlogPost = BlogPost & {
   status: "draft" | "published";
 };
 
-type BlogDraft = Omit<AdminBlogPost, "id"> & { id?: string; image_preview: string };
+type BlogDraft = Omit<AdminBlogPost, "id" | "hero_image_url" | "hero_image_key"> & {
+  id?: string;
+  hero_image_key: string;
+  image_preview: string;
+};
 
 function newDraft(): BlogDraft {
   return {
@@ -34,7 +38,7 @@ function newDraft(): BlogDraft {
     slug: "",
     category: "Kitchen notes",
     published_at: new Date().toISOString().slice(0, 10),
-    hero_image_url: "",
+    hero_image_key: "",
     image_preview: "",
     body: "",
     status: "draft",
@@ -83,35 +87,42 @@ export function BlogManagement({ token }: { token: string }) {
       slug: post.slug,
       category: post.category,
       published_at: post.published_at,
-      hero_image_url: post.hero_image_key || post.hero_image_url,
+      hero_image_key: post.hero_image_key ?? "",
       image_preview: post.hero_image_url,
       body: post.body,
       status: post.status,
     } : newDraft());
   };
 
+  const closeEditor = () => {
+    if (busy) return;
+    setDraft(null);
+    setPhoto(null);
+    setError("");
+  };
+
   const savePost = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!draft) return;
-    if (!draft.id && !photo) {
-      setError("Upload a hero image to RustFS before creating the post.");
+    if (!draft.hero_image_key && !photo) {
+      setError("Upload a hero image to RustFS before saving the post.");
       return;
     }
     setBusy(true);
     setError("");
     setMessage("");
     try {
-      let imageReference = draft.hero_image_url.trim();
+      let imageKey = draft.hero_image_key;
       if (photo) {
-        const uploaded = await uploadHomepageMedia(photo, token);
-        imageReference = uploaded.image_key;
+        const uploaded = await uploadHomepageMedia(photo, token, "blog");
+        imageKey = uploaded.image_key;
       }
       const payload = {
         title: draft.title.trim(),
         slug: draft.slug.trim(),
         category: draft.category.trim(),
         published_at: draft.published_at,
-        hero_image_url: imageReference,
+        hero_image_key: imageKey,
         body: draft.body.trim(),
         status: draft.status,
       };
@@ -164,50 +175,79 @@ export function BlogManagement({ token }: { token: string }) {
           <PlusIcon className="size-4" /> Add blog post
         </button>
       </div>
-      {error ? <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">{error}</p> : null}
+      {error && !draft ? <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">{error}</p> : null}
       {message ? <p role="status" className="rounded-xl border border-cardamom-200 bg-cardamom-50 p-3 text-sm text-cardamom-700">{message}</p> : null}
 
       {draft ? (
-        <form onSubmit={savePost} className="space-y-4 rounded-2xl border border-paper-200 bg-white p-5 shadow-xs">
-          <div className="flex items-center justify-between gap-3">
-            <h3 className="font-display text-lg font-semibold text-ink-900">{draft.id ? "Edit blog post" : "Create blog post"}</h3>
-            <button type="button" className={secondaryButton} onClick={() => setDraft(null)}>Cancel</button>
-          </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            <label className={labelClass}>Title
-              <input required maxLength={255} className={fieldClass} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
-            </label>
-            <label className={labelClass}>URL slug
-              <input required maxLength={255} className={fieldClass} placeholder="fresh-spice-notes" value={draft.slug} onChange={(event) => setDraft({ ...draft, slug: event.target.value })} />
-            </label>
-            <label className={labelClass}>Category
-              <input required maxLength={120} className={fieldClass} value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} />
-            </label>
-            <label className={labelClass}>Publish date
-              <input required type="date" className={fieldClass} value={draft.published_at} onChange={(event) => setDraft({ ...draft, published_at: event.target.value })} />
-            </label>
-            <label className={labelClass}>Status
-              <select className={fieldClass} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as BlogDraft["status"] })}>
-                <option value="draft">Draft</option>
-                <option value="published">Published</option>
-              </select>
-            </label>
-            <label className={labelClass}>Upload hero image to RustFS
-              <input required={!draft.id && !photo} type="file" accept="image/*" className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5`} onChange={(event) => setPhoto(event.currentTarget.files?.[0] ?? null)} />
-              {photo ? <span className="mt-1 block text-xs text-ink-500">{photo.name} will be uploaded with the post.</span> : null}
-              {draft.id && !photo ? <span className="mt-1 block text-xs text-ink-500">Leave empty to keep the current hero image.</span> : null}
-            </label>
-            {draft.image_preview ? (
-              <SmartImage src={draft.image_preview} alt={`${draft.title || "Blog post"} preview`} aspect="aspect-video" sizes="(max-width: 640px) 100vw, 50vw" wrapperClassName="rounded-xl sm:col-span-2" zoom={false} />
-            ) : null}
-            <label className={`${labelClass} sm:col-span-2`}>Story
-              <textarea required rows={10} maxLength={100000} className={fieldClass} placeholder="Write the story. Separate paragraphs with a blank line." value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
-            </label>
-          </div>
-          <div className="flex justify-end">
-            <button type="submit" className={primaryButton} disabled={busy}>{busy ? "Saving…" : draft.id ? "Save changes" : "Create post"}</button>
-          </div>
-        </form>
+        <div
+          className="fixed inset-0 z-[100] flex items-end justify-center bg-ink-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-5"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) closeEditor();
+          }}
+        >
+          <section
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="blog-editor-title"
+            className="max-h-[92vh] w-full max-w-3xl overflow-y-auto rounded-t-3xl bg-paper-50 p-5 shadow-2xl sm:rounded-3xl sm:p-7"
+          >
+            <form onSubmit={savePost} className="space-y-4">
+              <div className="mb-5 flex items-start justify-between gap-4">
+                <div>
+                  <p className="eyebrow">Admin workspace</p>
+                  <h2 id="blog-editor-title" className="mt-1 font-display text-2xl font-semibold text-ink-950">
+                    {draft.id ? "Edit blog post" : "Create blog post"}
+                  </h2>
+                </div>
+                <button
+                  type="button"
+                  className="rounded-xl p-2 text-ink-500 hover:bg-paper-100 hover:text-ink-900 disabled:opacity-50"
+                  onClick={closeEditor}
+                  disabled={busy}
+                  aria-label="Close blog editor"
+                >
+                  <span aria-hidden="true">×</span>
+                </button>
+              </div>
+              {error ? <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 p-3 text-sm text-chili-700">{error}</p> : null}
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className={labelClass}>Title
+                  <input required maxLength={255} className={fieldClass} value={draft.title} onChange={(event) => setDraft({ ...draft, title: event.target.value })} />
+                </label>
+                <label className={labelClass}>URL slug
+                  <input required maxLength={255} className={fieldClass} placeholder="fresh-spice-notes" value={draft.slug} onChange={(event) => setDraft({ ...draft, slug: event.target.value })} />
+                </label>
+                <label className={labelClass}>Category
+                  <input required maxLength={120} className={fieldClass} value={draft.category} onChange={(event) => setDraft({ ...draft, category: event.target.value })} />
+                </label>
+                <label className={labelClass}>Publish date
+                  <input required type="date" className={fieldClass} value={draft.published_at} onChange={(event) => setDraft({ ...draft, published_at: event.target.value })} />
+                </label>
+                <label className={labelClass}>Status
+                  <select className={fieldClass} value={draft.status} onChange={(event) => setDraft({ ...draft, status: event.target.value as BlogDraft["status"] })}>
+                    <option value="draft">Draft</option>
+                    <option value="published">Published</option>
+                  </select>
+                </label>
+                <label className={labelClass}>Upload hero image to RustFS
+                  <input required={!draft.hero_image_key && !photo} type="file" accept="image/*" className={`${fieldClass} file:mr-3 file:rounded-lg file:border-0 file:bg-paper-100 file:px-3 file:py-1.5`} onChange={(event) => setPhoto(event.currentTarget.files?.[0] ?? null)} />
+                  {photo ? <span className="mt-1 block text-xs text-ink-500">{photo.name} will be uploaded with the post.</span> : null}
+                  {draft.hero_image_key && !photo ? <span className="mt-1 block text-xs text-ink-500">Leave empty to keep the current hero image.</span> : null}
+                </label>
+                {draft.image_preview ? (
+                  <SmartImage src={draft.image_preview} alt={`${draft.title || "Blog post"} preview`} aspect="aspect-video" sizes="(max-width: 640px) 100vw, 50vw" wrapperClassName="rounded-xl sm:col-span-2" zoom={false} />
+                ) : null}
+                <label className={`${labelClass} sm:col-span-2`}>Story
+                  <textarea required rows={10} maxLength={100000} className={fieldClass} placeholder="Write the story. Separate paragraphs with a blank line." value={draft.body} onChange={(event) => setDraft({ ...draft, body: event.target.value })} />
+                </label>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button type="button" className={secondaryButton} onClick={closeEditor} disabled={busy}>Cancel</button>
+                <button type="submit" className={primaryButton} disabled={busy}>{busy ? "Saving…" : draft.id ? "Save changes" : "Create post"}</button>
+              </div>
+            </form>
+          </section>
+        </div>
       ) : null}
 
       {loading ? <p role="status" className="text-sm text-ink-500">Loading blog posts…</p> : posts.length ? (

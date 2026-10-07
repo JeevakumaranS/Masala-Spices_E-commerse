@@ -4,6 +4,7 @@ import { useState } from "react";
 import type { Product } from "@/lib/types";
 import { SmartImage } from "@/components/ui/SmartImage";
 import { percentOff } from "@/lib/format";
+import { getStartingMrp, getStartingPrice } from "@/lib/productPricing";
 import { cn } from "@/lib/cn";
 
 type Props = {
@@ -22,7 +23,7 @@ export function ProductGallery({ product }: Props) {
   const active = images[Math.min(activeIndex, Math.max(images.length - 1, 0))] ?? null;
   const alt =
     active?.alt_text && active.alt_text.trim().length > 0 ? active.alt_text : product.name;
-  const off = percentOff(product.price, product.mrp);
+  const off = percentOff(getStartingPrice(product), getStartingMrp(product));
 
   return (
     <div className="flex flex-col gap-4">

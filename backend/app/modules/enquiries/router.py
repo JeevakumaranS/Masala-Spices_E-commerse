@@ -3,13 +3,13 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, insert, or_, select, update
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, messages_table
 from app.modules.admin.auth import require_admin
-from app.modules.enquiries.schemas import MessageInput, MessageStatusInput, MessageSubject
+from app.modules.enquiries.schemas import MessageInput, MessageStatus, MessageStatusInput, MessageSubject
 
 router = APIRouter(prefix="/api/enquiries", tags=["enquiries"])
 admin_router = APIRouter(prefix="/api/admin/messages", tags=["admin-messages"])
@@ -22,7 +22,7 @@ async def create_enquiry(
 ) -> dict[str, str]:
     result = await db.execute(
         insert(messages_table)
-        .values(**payload.model_dump(), status="new")
+        .values(**payload.model_dump(), status=MessageStatus.NEW)
         .returning(messages_table.c.id)
     )
     message_id = result.scalar_one()
@@ -51,7 +51,6 @@ async def list_messages(
             messages_table.c.name.ilike(pattern),
             messages_table.c.email.ilike(pattern),
             messages_table.c.phone.ilike(pattern),
-            messages_table.c.company_name.ilike(pattern),
             messages_table.c.subject.ilike(pattern),
             messages_table.c.message.ilike(pattern),
         ))
@@ -59,6 +58,17 @@ async def list_messages(
     total_count = await db.scalar(
         select(func.count()).select_from(messages_table).where(*conditions)
     )
+    unread_result = await db.execute(
+        select(messages_table.c.subject, func.count())
+        .where(messages_table.c.status == MessageStatus.NEW)
+        .group_by(messages_table.c.subject)
+    )
+    unread_counts = {
+        subject: 0
+        for subject in ("General", "Order issue", "Wholesale", "Export", "Bulk orders")
+    }
+    unread_counts.update({str(subject): int(count) for subject, count in unread_result.all()})
+    unread_counts["All"] = sum(unread_counts.values())
     result = await db.execute(
         select(messages_table)
         .where(*conditions)
@@ -71,6 +81,7 @@ async def list_messages(
         "page": page,
         "page_size": page_size,
         "total_count": int(total_count or 0),
+        "unread_counts": unread_counts,
     }
 
 
@@ -91,3 +102,18 @@ async def update_message_status(
         raise HTTPException(status_code=404, detail="Message not found.")
     await db.commit()
     return dict(message)
+
+
+@admin_router.delete("/{message_id}", status_code=204, dependencies=[Depends(require_admin)])
+async def delete_message(
+    message_id: UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    result = await db.execute(
+        delete(messages_table)
+        .where(messages_table.c.id == message_id)
+    )
+    if not result.rowcount:
+        raise HTTPException(status_code=404, detail="Message not found.")
+    await db.commit()
+    return Response(status_code=204)

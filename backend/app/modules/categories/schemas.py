@@ -11,3 +11,5 @@ class Category(BaseModel):
     slug: str
     type: str = "product_type"
     description: str | None = None
+    image_key: str | None = None
+    image_url: str | None = None

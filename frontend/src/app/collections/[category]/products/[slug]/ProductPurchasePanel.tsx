@@ -6,11 +6,11 @@ import type { Product } from "@/lib/types";
 import { formatINR, percentOff } from "@/lib/format";
 import { cn } from "@/lib/cn";
 import { AddToCartButton } from "@/components/AddToCartButton";
+import { WishlistButton } from "@/components/WishlistButton";
 import { QuantityStepper } from "@/components/ui/QuantityStepper";
 import { useCartStore } from "@/store/cart";
 import { useUIStore } from "@/store/ui";
 import { CheckCircleIcon, FlameIcon } from "@/components/ui/icons";
-import { ProductWishlistButton } from "./ProductWishlistButton";
 
 type Props = {
   product: Product;
@@ -31,8 +31,8 @@ export function ProductPurchasePanel({ product }: Props) {
   const selected =
     product.variants.find((variant) => variant.id === variantId) ?? product.variants[0] ?? null;
 
-  const price = selected?.price ?? product.price;
-  const mrp = selected?.mrp ?? product.mrp;
+  const price = selected?.price ?? product.price ?? 0;
+  const mrp = selected?.mrp ?? product.mrp ?? 0;
   const off = percentOff(price, mrp);
   const bundleStock = product.is_combo
     ? product.combo_catalog_products.length
@@ -40,7 +40,7 @@ export function ProductPurchasePanel({ product }: Props) {
       : 0
     : null;
   const stock = bundleStock ?? selected?.stock_qty ?? 0;
-  const inStock = stock > 0 || (!product.is_combo && !selected);
+  const inStock = product.is_combo ? stock > 0 : Boolean(selected && selected.stock_qty > 0);
   const maxQty = Math.max(1, Math.min(stock || 20, 20));
   const perMeal = product.meal_cost ?? (product.categories.some((category) => category.includes("kit") || category.includes("combo")) ? Math.ceil(price / 4) : null);
 
@@ -60,7 +60,6 @@ export function ProductPurchasePanel({ product }: Props) {
         slug: product.slug,
         category: product.categories[0] ?? "all",
         categories: product.categories,
-        dishType: product.dish_type,
         image: product.images[0]?.url ?? "",
         packSize: selected?.pack_size ?? "Standard",
         price,
@@ -204,7 +203,7 @@ export function ProductPurchasePanel({ product }: Props) {
           appearance="full"
           className="btn-lg btn-block sm:flex-1"
         />
-        <ProductWishlistButton product={product} />
+        <WishlistButton product={product} />
         <button
           type="button"
           onClick={handleBuyNow}

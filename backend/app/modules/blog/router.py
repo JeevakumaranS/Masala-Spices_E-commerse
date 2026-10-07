@@ -21,7 +21,7 @@ admin_router = APIRouter(prefix="/api/admin/blog", tags=["admin-blog"])
 
 async def _blog_post_response(post: dict[str, Any]) -> dict[str, Any]:
     image_reference = post["hero_image_url"]
-    if image_reference.startswith("homepage/"):
+    if image_reference.startswith(("blog/", "homepage/", "masalafolder/blog/")):
         post["hero_image_key"] = image_reference
         if not await asyncio.to_thread(object_exists, image_reference):
             raise HTTPException(
@@ -29,6 +29,8 @@ async def _blog_post_response(post: dict[str, Any]) -> dict[str, Any]:
                 detail="A blog photo is missing from RustFS. Upload that photo again.",
             )
         post["hero_image_url"] = await asyncio.to_thread(get_file_url, image_reference)
+    else:
+        post["hero_image_url"] = ""
     return post
 
 
@@ -82,7 +84,10 @@ async def create_blog_post(
     try:
         result = await db.execute(
             insert(blog_posts_table)
-            .values(**payload.model_dump())
+            .values(**{
+                **payload.model_dump(exclude={"hero_image_key"}),
+                "hero_image_url": payload.hero_image_key,
+            })
             .returning(blog_posts_table)
         )
         post = dict(result.mappings().one())
@@ -103,7 +108,13 @@ async def update_blog_post(
         result = await db.execute(
             update(blog_posts_table)
             .where(blog_posts_table.c.id == post_id)
-            .values(**payload.model_dump(), updated_at=datetime.now(timezone.utc))
+            .values(
+                **{
+                    **payload.model_dump(exclude={"hero_image_key"}),
+                    "hero_image_url": payload.hero_image_key,
+                },
+                updated_at=datetime.now(timezone.utc),
+            )
             .returning(blog_posts_table)
         )
         post = result.mappings().first()

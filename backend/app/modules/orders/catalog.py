@@ -11,7 +11,6 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import (
-    combo_catalog_products_table,
     combos_table,
     products_table,
     variants_table,
@@ -66,15 +65,18 @@ async def quote_order_items(
         raise CatalogValidationError("One or more products in your bag are no longer available.")
 
     combo_ids = [product_id for product_id, product in products.items() if product["is_combo"]]
-    catalog_component_result = await db.execute(
-        select(combo_catalog_products_table)
-        .where(combo_catalog_products_table.c.combo_id.in_(combo_ids))
-        .order_by(combo_catalog_products_table.c.sort_order)
-    ) if combo_ids else None
     catalog_bundle_components: dict[UUID, list[dict]] = {}
-    for row in catalog_component_result.mappings() if catalog_component_result is not None else ():
-        component = dict(row)
-        catalog_bundle_components.setdefault(component["combo_id"], []).append(component)
+    for combo_id in combo_ids:
+        components = products[combo_id].get("catalog_products") or []
+        catalog_bundle_components[combo_id] = [
+            {
+                **component,
+                "product_id": UUID(component["product_id"]),
+                "variant_id": UUID(component["variant_id"]),
+                "quantity": int(component["quantity"]),
+            }
+            for component in components
+        ]
 
     component_variant_ids = {
         component["variant_id"]
@@ -144,6 +146,8 @@ async def quote_order_items(
             raise CatalogValidationError("A selected pack size is no longer available.")
         if variant is not None and variant["product_id"] != item.product_id:
             raise CatalogValidationError("A selected pack size does not match its product.")
+        if variant is None and not product["is_combo"]:
+            raise CatalogValidationError("Choose an available pack size for this product.")
 
         unit_price = Decimal(str(variant["price"] if variant else product["price"]))
         if unit_price < 0:
@@ -162,7 +166,7 @@ async def quote_order_items(
                 variant_id=item.variant_id,
                 name=str(product["name"]),
                 pack_size=str(variant["pack_size"] if variant else "Standard"),
-                dish_type=product.get("dish_type"),
+                dish_type=product.get("dish_type") if product["is_combo"] else None,
                 categories=tuple(product.get("categories") or []),
                 sku=str(variant["sku"] if variant is not None else f"PRODUCT-{product['id']}"),
                 unit_price=unit_price,

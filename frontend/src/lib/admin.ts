@@ -1,6 +1,10 @@
+import axios from "axios";
 import type { Category, HomepageContent, Product } from "@/lib/types";
 
 import { apiClient, getApiErrorMessage } from "@/lib/http";
+import { useUIStore } from "@/store/ui";
+
+const ADMIN_SESSION_TIMEOUT_MESSAGE = "Session timed out. Please sign in again.";
 
 export type AdminProduct = Product & {
   variants: (Product["variants"][number] & { batch_no?: string | null })[];
@@ -104,7 +108,7 @@ export type AdminOverviewResponse = {
 };
 
 export type ProductInput = Omit<AdminProduct, "id" | "variants"> & {
-  variants: Omit<AdminProduct["variants"][number], "id">[];
+  variants: (Omit<AdminProduct["variants"][number], "id"> & { id?: string })[];
 };
 
 export type AdminRegistrationStatus = {
@@ -129,17 +133,16 @@ export type AdminRegistrationResult = {
 export type AdminIntegrationSettings = {
   sms_enabled: boolean;
   email_enabled: boolean;
-  sms_api_key_configured: boolean;
+  sms_configured: boolean;
+  email_configured: boolean;
   email_api_key_configured: boolean;
+  sms_account_sid_configured: boolean;
+  sms_account_sid: string;
+  sms_auth_token: string;
   email_sender_name: string;
   email_sender_email: string;
   sms_sender_phone: string;
-};
-
-export type AdminTwilioCredentials = {
-  account_sid: string;
-  auth_token: string;
-  sender_phone: string;
+  email_api_key: string;
 };
 
 export type HomepageMediaUpload = {
@@ -147,32 +150,27 @@ export type HomepageMediaUpload = {
   image_url: string;
 };
 
-export type HomepageMediaSyncResult = {
-  content: HomepageContent;
-  uploaded_count: number;
-  already_in_rustfs_count: number;
-  product_count: number;
-};
-
-export async function uploadHomepageMedia(file: File, token: string): Promise<HomepageMediaUpload> {
+export async function uploadHomepageMedia(
+  file: File,
+  token: string,
+  section: "homepage/categories" | "blog" | "recipes" | "collections" | "about" = "homepage/categories",
+  name?: string,
+): Promise<HomepageMediaUpload> {
   const formData = new FormData();
   formData.append("file", file);
   try {
     const response = await apiClient.post<HomepageMediaUpload>(
       "/api/admin/homepage-media",
       formData,
-      { headers: { Authorization: `Bearer ${token}` } },
+      {
+        params: { section, ...(name ? { name } : {}) },
+        headers: { Authorization: `Bearer ${token}` },
+      },
     );
     return response.data;
   } catch (error) {
     throw new Error(getApiErrorMessage(error, "Homepage image upload failed."));
   }
-}
-
-export function syncHomepageImagesToRustfs(token: string): Promise<HomepageMediaSyncResult> {
-  return adminRequest<HomepageMediaSyncResult>("/api/admin/homepage-media/sync", token, {
-    method: "POST",
-  });
 }
 
 export function getAdminHomepageContent(token: string): Promise<HomepageContent> {
@@ -210,33 +208,6 @@ export async function uploadAdminHeroImage(
   }
 }
 
-export async function revealAdminTwilioCredentials(
-  token: string,
-): Promise<AdminTwilioCredentials> {
-  const result = await adminRequest<AdminTwilioCredentials>(
-    "/api/admin/integration-settings/reveal",
-    token,
-    { method: "POST", body: JSON.stringify({ channel: "sms" }) },
-  );
-  if (!result.account_sid || !result.auth_token || !result.sender_phone) {
-    throw new Error("The server did not return complete Twilio credentials.");
-  }
-  return result;
-}
-
-export async function revealAdminIntegrationApiKey(
-  channel: "sms" | "email",
-  token: string,
-): Promise<string> {
-  const result = await adminRequest<{ api_key: string }>(
-    "/api/admin/integration-settings/reveal",
-    token,
-    { method: "POST", body: JSON.stringify({ channel }) },
-  );
-  if (!result.api_key) throw new Error("The server did not return the saved API key.");
-  return result.api_key;
-}
-
 export async function adminRequest<T>(
   path: string,
   token: string,
@@ -257,6 +228,17 @@ export async function adminRequest<T>(
     });
     return response.data;
   } catch (error) {
+    if (
+      typeof window !== "undefined"
+      && axios.isAxiosError(error)
+      && error.response?.status === 401
+    ) {
+      if (window.sessionStorage.getItem("masala-admin-token") === token) {
+        window.sessionStorage.removeItem("masala-admin-token");
+        window.dispatchEvent(new Event("masala-admin-session"));
+        useUIStore.getState().showToast(ADMIN_SESSION_TIMEOUT_MESSAGE, "error");
+      }
+    }
     throw new Error(getApiErrorMessage(error, "Admin request failed."));
   }
 }

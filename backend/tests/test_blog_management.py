@@ -9,7 +9,6 @@ from fastapi.testclient import TestClient
 
 from app.core.application import create_app
 from app.modules.admin.auth import require_admin
-from app.modules.blog.data import sample_blog_posts
 from app.modules.blog import router as blog_router
 from app.modules.blog.schemas import BlogPostInput
 
@@ -20,7 +19,7 @@ def _blog_payload() -> dict[str, object]:
         "slug": " Fresh Spice Notes ",
         "category": "  Pantry  ",
         "published_at": "2026-10-05",
-        "hero_image_url": "https://images.example.test/spices.jpg",
+        "hero_image_key": "blog/spices.jpg",
         "body": "  A useful story about spice.  ",
         "status": "published",
     }
@@ -49,17 +48,12 @@ def test_blog_post_input_rejects_blank_required_fields(field: str, value: str) -
         BlogPostInput.model_validate(payload)
 
 
-def test_blog_post_input_rejects_non_http_image_reference() -> None:
+def test_blog_post_input_rejects_external_image_url() -> None:
     payload = _blog_payload()
-    payload["hero_image_url"] = "javascript:alert(1)"
+    payload["hero_image_key"] = "https://images.example.test/spices.jpg"
 
-    with pytest.raises(ValidationError, match=r"HTTP\(S\) photo URL"):
+    with pytest.raises(ValidationError, match="image key"):
         BlogPostInput.model_validate(payload)
-
-
-def test_sample_blog_data_has_ten_unique_posts() -> None:
-    assert len(sample_blog_posts) == 10
-    assert len({post["slug"] for post in sample_blog_posts}) == 10
 
 
 def test_blog_post_response_signs_rustfs_image_keys(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -74,7 +68,9 @@ def test_blog_post_response_signs_rustfs_image_keys(monkeypatch: pytest.MonkeyPa
     assert post["hero_image_url"] == "https://storage.example/homepage/blog/hero.jpg"
 
 
-def test_admin_blog_crud_publishes_and_deletes_posts() -> None:
+def test_admin_blog_crud_publishes_and_deletes_posts(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(blog_router, "object_exists", lambda _key: True)
+    monkeypatch.setattr(blog_router, "get_file_url", lambda key: f"https://storage.example/{key}")
     application = create_app()
     application.dependency_overrides[require_admin] = lambda: "blog-test-admin"
     slug = f"admin-blog-test-{date.today().isoformat()}"
@@ -84,7 +80,7 @@ def test_admin_blog_crud_publishes_and_deletes_posts() -> None:
         "slug": slug,
         "category": "Testing",
         "published_at": date.today().isoformat(),
-        "hero_image_url": "https://images.example.test/blog-test.jpg",
+        "hero_image_key": "blog/blog-test.jpg",
         "body": "A test-only story.",
         "status": "draft",
     }

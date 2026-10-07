@@ -1,24 +1,20 @@
 """Validated contact and bulk-order message contracts."""
 
-from typing import Any, Literal
+from enum import Enum
 
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, Field, field_validator
 
-MessageSubject = Literal["General", "Order issue", "Wholesale", "Export", "Bulk orders"]
-MessageSource = Literal["contact", "bulk_order"]
+MessageSubject = str
 
 
 class MessageInput(BaseModel):
     name: str = Field(min_length=2, max_length=160)
     email: str = Field(min_length=3, max_length=254)
-    phone: str | None = Field(default=None, max_length=24)
-    company_name: str | None = Field(default=None, max_length=255)
-    subject: MessageSubject
+    phone: str = Field(min_length=7, max_length=24)
+    subject: MessageSubject = Field(min_length=1, max_length=80)
     message: str = Field(min_length=10, max_length=3000)
-    source: MessageSource = "contact"
-    details: dict[str, Any] = Field(default_factory=dict)
 
-    @field_validator("name", "message")
+    @field_validator("name", "message", "subject")
     @classmethod
     def strip_required_text(cls, value: str) -> str:
         value = value.strip()
@@ -35,24 +31,19 @@ class MessageInput(BaseModel):
             raise ValueError("Enter a valid email address.")
         return normalized
 
-    @field_validator("phone", "company_name")
+    @field_validator("phone")
     @classmethod
-    def clean_optional_text(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return value.strip() or None
+    def normalize_phone(cls, value: str) -> str:
+        normalized = value.strip()
+        if len(normalized) < 7:
+            raise ValueError("Enter a valid phone number.")
+        return normalized
 
-    @model_validator(mode="after")
-    def validate_source_fields(self) -> "MessageInput":
-        if self.source == "bulk_order":
-            if self.subject != "Bulk orders":
-                raise ValueError("Bulk-order messages must use the Bulk orders subject.")
-            if not self.company_name or not self.phone:
-                raise ValueError("Bulk-order messages need a company name and phone number.")
-        elif self.subject == "Bulk orders":
-            raise ValueError("Use the bulk-order form for Bulk orders messages.")
-        return self
+
+class MessageStatus(str, Enum):
+    NEW = "new"
+    READ = "read"
 
 
 class MessageStatusInput(BaseModel):
-    status: Literal["new", "read"]
+    status: MessageStatus

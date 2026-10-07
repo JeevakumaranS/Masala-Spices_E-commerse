@@ -64,7 +64,9 @@ export default async function HomePage() {
 
   const configuredBestsellers = homepageContent.bestsellers.product_slugs;
   const bestsellers = configuredBestsellers.length
-    ? configuredBestsellers.flatMap((slug) => products.filter((product) => product.slug === slug))
+    ? configuredBestsellers.flatMap((slug) =>
+        products.filter((product) => product.slug === slug && !product.is_combo),
+      )
     : [];
   const configuredCombos = [...new Set(homepageContent.combos.product_slugs)].slice(0, 4);
   const featuredCombos = configuredCombos.flatMap((slug) =>
@@ -169,11 +171,11 @@ export default async function HomePage() {
 
       {/* ============================ COMBOS ============================ */}
       {featuredCombos.length > 0 ? (
-        <section className="bg-paper-50 py-7 md:py-9">
+        <section className="bg-paper-50 pt-2 pb-8 md:pt-3 md:pb-10">
           <div className="shell">
             <div className="flex flex-col items-center gap-2 sm:relative sm:block">
               <div className="text-center sm:mx-auto sm:max-w-[calc(100%-11rem)]">
-                <h2 className="section-title text-[1.375rem] text-center md:text-[1.625rem]">Better Valued Combos</h2>
+                <h2 className="section-title text-center text-3xl text-masala-900 md:text-4xl">Better Valued Combos</h2>
                 {homepageContent.combos.description ? <p className="mt-1.5 text-center text-xs text-ink-500 sm:text-sm">{homepageContent.combos.description}</p> : null}
               </div>
               <Link
@@ -184,9 +186,9 @@ export default async function HomePage() {
                 <ArrowRightIcon className="size-4 transition-transform group-hover:translate-x-1" />
               </Link>
             </div>
-            <div className="mt-5 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="mt-6 grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4">
               {featuredCombos.map((combo, index) => (
-                <ProductCard key={combo.id} product={combo} priority={index < 2} density="compact" className="h-full min-w-0" />
+                <ProductCard key={combo.id} product={combo} priority={index < 2} density="comfortable" imageAspect="square" className="h-full min-w-0" />
               ))}
             </div>
           </div>
