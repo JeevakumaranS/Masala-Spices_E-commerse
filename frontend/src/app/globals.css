@@ -712,6 +712,14 @@
     -ms-overflow-style: none;
     scrollbar-width: none;
   }
+  @media (max-width: 47.999rem) {
+    html {
+      scrollbar-width: none;
+    }
+    html::-webkit-scrollbar {
+      display: none;
+    }
+  }
 
   .text-shadow-hero {
     text-shadow: 0 2px 20px rgb(23 16 9 / 0.35);

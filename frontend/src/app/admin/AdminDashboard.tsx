@@ -32,10 +32,12 @@ import {
   ArrowRightIcon,
   BagIcon,
   CheckCircleIcon,
+  CloseIcon,
   FlameIcon,
   HomeIcon,
   LogOutIcon,
   MailIcon,
+  MenuIcon,
   PackageIcon,
   PlusIcon,
   RefreshIcon,
@@ -152,8 +154,8 @@ const EMPTY_ANALYTICS: AnalyticsReport = {
 const OVERVIEW_WIDGETS = ["products", "categories", "orders", "coupons", "reviews", "hero_images", "analytics"] as const;
 
 const fieldClass =
-  "mt-1.5 w-full rounded-xl border border-paper-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 outline-none transition focus:border-masala-500 focus:ring-2 focus:ring-masala-500/15";
-const labelClass = "block text-xs font-semibold tracking-wide text-ink-600";
+  "mt-1.5 block w-full min-w-0 max-w-full rounded-xl border border-paper-200 bg-white px-3.5 py-2.5 text-sm text-ink-900 outline-none transition focus:border-masala-500 focus:ring-2 focus:ring-masala-500/15";
+const labelClass = "block min-w-0 text-xs font-semibold tracking-wide text-ink-600";
 const primaryButton =
   "inline-flex items-center justify-center gap-2 rounded-xl bg-masala-700 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-masala-800 disabled:cursor-not-allowed disabled:opacity-50";
 const secondaryButton =
@@ -393,7 +395,7 @@ function Modal({
 }) {
   return (
     <div
-      className="fixed inset-0 z-[100] flex items-end justify-center bg-ink-950/55 p-0 backdrop-blur-sm sm:items-center sm:p-5"
+      className="fixed inset-0 z-[100] flex items-center justify-center overflow-y-auto bg-ink-950/55 p-3 backdrop-blur-sm sm:p-5"
       onMouseDown={(event) => {
         if (event.target === event.currentTarget) onClose();
       }}
@@ -402,7 +404,7 @@ function Modal({
         role="dialog"
         aria-modal="true"
         aria-label={title}
-        className={`max-h-[92vh] w-full overflow-y-auto rounded-t-3xl bg-paper-50 p-5 shadow-2xl sm:rounded-3xl sm:p-7 ${wide ? "max-w-3xl" : "max-w-xl"}`}
+        className={`max-h-[90dvh] w-full min-w-0 max-w-full overflow-x-hidden overflow-y-auto overscroll-contain rounded-2xl border border-paper-200 bg-paper-50 p-4 shadow-2xl sm:max-h-[92vh] sm:rounded-3xl sm:p-7 ${wide ? "sm:max-w-3xl" : "sm:max-w-xl"}`}
       >
         <div className="mb-5 flex items-start justify-between gap-4">
           <div>
@@ -428,6 +430,7 @@ export default function AdminDashboard() {
   const token = useSyncExternalStore(subscribeAdminSession, getAdminSession, () => "");
   const showToast = useUIStore((state) => state.showToast);
   const [section, setSection] = useState<Section>("overview");
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const [orderFilter, setOrderFilter] = useState<OrderFilter>("all");
   const [ordersPage, setOrdersPage] = useState(1);
   const [productsPage, setProductsPage] = useState(1);
@@ -501,7 +504,17 @@ export default function AdminDashboard() {
   const navigateToSection = (nextSection: Section) => {
     setNotice("");
     setSection(nextSection);
+    setMobileNavOpen(false);
   };
+
+  useEffect(() => {
+    if (!mobileNavOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setMobileNavOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [mobileNavOpen]);
 
   useEffect(() => {
     if (token) return;
@@ -1171,8 +1184,92 @@ export default function AdminDashboard() {
 
   return (
     <div className="min-h-screen bg-[#f7f3ec] text-ink-900 md:grid md:grid-cols-[250px_minmax(0,1fr)]">
-      <aside className="border-b border-paper-200 bg-[#302016] text-paper-100 md:sticky md:top-0 md:flex md:h-screen md:min-h-0 md:self-start md:flex-col md:border-b-0 md:border-r md:px-4 md:py-6">
-        <div className="flex items-center justify-between gap-4 px-4 py-4 md:px-2 md:py-1">
+      <header className="sticky top-0 z-40 flex min-w-0 items-center gap-2 border-b border-[#543827] bg-[#302016] px-3 py-3 text-paper-100 shadow-md md:hidden">
+        <button
+          type="button"
+          onClick={() => setMobileNavOpen(true)}
+          aria-label="Open admin sections"
+          aria-expanded={mobileNavOpen}
+          aria-controls="mobile-admin-navigation"
+          className="grid size-9 shrink-0 place-items-center rounded-xl text-paper-100 transition hover:bg-white/10 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-saffron-300"
+        >
+          <MenuIcon className="size-5" />
+        </button>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate font-display text-base font-semibold text-white">Masala House</span>
+          <span className="hidden text-[0.6rem] font-bold tracking-[0.14em] text-paper-400 uppercase min-[375px]:block">Back office</span>
+        </span>
+        <button
+          type="button"
+          onClick={() => void refresh(true)}
+          className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border border-paper-400/30 px-2 text-xs font-semibold text-paper-100 transition hover:bg-white/10"
+          disabled={busy}
+        >
+          <RefreshIcon className="size-4" />
+          Refresh
+        </button>
+        <button
+          type="button"
+          onClick={signOut}
+          className="inline-flex h-9 shrink-0 items-center gap-1 rounded-xl border border-chili-400/30 bg-chili-500/15 px-2 text-xs font-semibold text-chili-100 transition hover:bg-chili-500/30"
+        >
+          <LogOutIcon className="size-4" />
+          Sign out
+        </button>
+      </header>
+
+      <div
+        className={`fixed inset-0 z-50 md:hidden ${mobileNavOpen ? "visible" : "invisible pointer-events-none"}`}
+        onClick={() => setMobileNavOpen(false)}
+      >
+        <div className={`absolute inset-0 bg-ink-950/55 transition-opacity duration-300 ${mobileNavOpen ? "opacity-100" : "opacity-0"}`} />
+        <aside
+          id="mobile-admin-navigation"
+          role="dialog"
+          aria-modal="true"
+          aria-label="Admin sections"
+          aria-hidden={!mobileNavOpen}
+          className={`absolute inset-y-0 left-0 flex w-[min(19rem,88vw)] flex-col border-r border-paper-200/10 bg-[#302016] text-paper-100 shadow-2xl transition-transform duration-300 ease-out ${mobileNavOpen ? "translate-x-0" : "-translate-x-full"}`}
+          onClick={(event) => event.stopPropagation()}
+        >
+          <div className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+            <div className="flex items-center gap-3">
+              <span className="grid size-10 place-items-center rounded-2xl bg-saffron-400/15 text-saffron-300">
+                <FlameIcon className="size-5" />
+              </span>
+              <span>
+                <span className="block font-display text-lg font-semibold text-white">Masala House</span>
+                <span className="block text-[0.65rem] font-bold tracking-[0.16em] text-paper-400 uppercase">Back office</span>
+              </span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMobileNavOpen(false)}
+              aria-label="Close admin sections"
+              className="grid size-9 shrink-0 place-items-center rounded-xl text-paper-300 transition hover:bg-white/10 hover:text-white"
+            >
+              <CloseIcon className="size-5" />
+            </button>
+          </div>
+          <nav aria-label="Admin sections" className="no-scrollbar flex-1 space-y-1 overflow-y-auto px-3 py-4">
+            {NAV.map(({ id, label, Icon }) => (
+              <button
+                key={id}
+                type="button"
+                onClick={() => navigateToSection(id)}
+                aria-current={section === id ? "page" : undefined}
+                className={`flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-sm font-medium transition ${section === id ? "bg-saffron-400 text-ink-950 shadow-md" : "text-paper-300 hover:bg-white/10 hover:text-white"}`}
+              >
+                <Icon className="size-[1.05rem] shrink-0" />
+                {label}
+              </button>
+            ))}
+          </nav>
+        </aside>
+      </div>
+
+      <aside className="hidden border-b border-paper-200 bg-[#302016] text-paper-100 md:sticky md:top-0 md:flex md:h-screen md:min-h-0 md:self-start md:flex-col md:border-b-0 md:border-r md:px-4 md:py-6">
+        <div className="flex items-center justify-between gap-4 px-2 py-1">
           <div className="flex items-center gap-3">
             <span className="grid size-10 place-items-center rounded-2xl bg-saffron-400/15 text-saffron-300">
               <FlameIcon className="size-5" />
@@ -1182,18 +1279,15 @@ export default function AdminDashboard() {
               <span className="block text-[0.65rem] font-bold tracking-[0.16em] text-paper-400 uppercase">Back office</span>
             </span>
           </div>
-          <button type="button" onClick={signOut} className="text-xs font-semibold text-paper-300 hover:text-white md:hidden">
-            Sign out
-          </button>
         </div>
-        <nav aria-label="Admin sections" className="no-scrollbar flex gap-1 overflow-x-auto px-3 pb-3 md:mt-9 md:block md:flex-1 md:space-y-1 md:overflow-y-auto md:overflow-x-hidden md:px-0">
+        <nav aria-label="Admin sections" className="no-scrollbar mt-9 block flex-1 space-y-1 overflow-y-auto overflow-x-hidden px-0">
           {NAV.map(({ id, label, Icon }) => (
             <button
               key={id}
               type="button"
               onClick={() => navigateToSection(id)}
               aria-current={section === id ? "page" : undefined}
-              className={`flex shrink-0 items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition md:w-full ${section === id ? "bg-saffron-400 text-ink-950 shadow-md" : "text-paper-300 hover:bg-white/10 hover:text-white"}`}
+              className={`flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left text-sm font-medium transition ${section === id ? "bg-saffron-400 text-ink-950 shadow-md" : "text-paper-300 hover:bg-white/10 hover:text-white"}`}
             >
               <Icon className="size-[1.05rem]" />
               {label}
@@ -1203,7 +1297,7 @@ export default function AdminDashboard() {
         <button
           type="button"
           onClick={signOut}
-          className="group mx-3 mb-3 mt-2 inline-flex shrink-0 items-center gap-2 rounded-xl border border-chili-400/30 bg-chili-500/15 px-3 py-2 text-left text-xs font-semibold text-chili-100 transition hover:border-chili-300/60 hover:bg-chili-500/30 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-chili-300 md:mx-0 md:mb-0 md:mt-3 md:w-full md:gap-3 md:rounded-2xl md:px-3.5 md:py-3"
+          className="group mx-0 mb-0 mt-3 inline-flex w-full items-center gap-3 rounded-2xl border border-chili-400/30 bg-chili-500/15 px-3.5 py-3 text-left text-xs font-semibold text-chili-100 transition hover:border-chili-300/60 hover:bg-chili-500/30 hover:text-white focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-chili-300"
         >
           <span className="grid size-8 shrink-0 place-items-center rounded-xl bg-chili-500/20 text-chili-100 transition group-hover:bg-chili-500/40">
             <LogOutIcon className="size-4" />
@@ -1222,7 +1316,7 @@ export default function AdminDashboard() {
               {section === "overview" ? "A live view of orders, catalog and customer activity." : `Manage your store ${pageTitle.toLowerCase()} in one place.`}
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="hidden flex-wrap items-center gap-2 md:flex">
             <button type="button" onClick={() => void refresh(true)} className={secondaryButton} disabled={busy}>
               <RefreshIcon className="size-4" />
               Refresh
@@ -1757,7 +1851,7 @@ export default function AdminDashboard() {
       {productEditor ? (
         <Modal title={productEditor.is_combo ? (productEditor.id ? "Edit combo" : "Create combo") : (productEditor.id ? "Edit product" : "Add product")} onClose={() => setProductEditor(null)} wide>
           <form onSubmit={saveProduct} className="space-y-5">
-            <div className="grid items-start gap-x-4 gap-y-5 sm:grid-cols-2">
+            <div className="grid min-w-0 items-start gap-x-4 gap-y-5 sm:grid-cols-2">
               <label className={labelClass}>{productEditor.is_combo ? "Combo name" : "Product name"}<input required className={fieldClass} value={productEditor.name} onChange={(event) => setProductEditor({ ...productEditor, name: event.target.value })} /></label>
               <label className={labelClass}>URL slug<input required className={fieldClass} value={productEditor.slug} onChange={(event) => setProductEditor({ ...productEditor, slug: event.target.value })} /></label>
               {productEditor.is_combo ? (
@@ -1820,7 +1914,7 @@ export default function AdminDashboard() {
               )}
                   <label className={labelClass}>Status<SelectField value={productEditor.status} onChange={(event) => setProductEditor({ ...productEditor, status: event.target.value })}><option value="active">Active</option><option value="draft">Draft</option><option value="archived">Archived</option></SelectField></label>
               {productEditor.is_combo ? (
-                <section className="sm:col-span-2 rounded-2xl border border-paper-200 bg-paper-50 p-4">
+                <section className="min-w-0 sm:col-span-2 rounded-2xl border border-paper-200 bg-paper-50 p-4">
                   <div className="mb-3">
                     <h3 className="font-semibold text-ink-900">Regular products in this combo</h3>
                     <p className="text-xs text-ink-500">Select at least one catalog product pack. Its regular inventory is deducted when the combo is purchased.</p>
@@ -1914,13 +2008,13 @@ export default function AdminDashboard() {
             </div>
             {!productEditor.is_combo ? (
               <div>
-              <div className="mb-3 flex items-center justify-between gap-3">
+              <div className="mb-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div><h3 className="font-semibold text-ink-900">Pack sizes, inventory & batch</h3><p className="text-xs text-ink-500">Add SKU, stock quantity, batch number and expiry date per variant.</p></div>
-                <button type="button" className={secondaryButton} onClick={() => setProductEditor({ ...productEditor, variants: [...productEditor.variants, { pack_size: "", price: "", mrp: "", sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }] })}><PlusIcon className="size-4" />Add pack</button>
+                <button type="button" className={`${secondaryButton} shrink-0 sm:w-auto`} onClick={() => setProductEditor({ ...productEditor, variants: [...productEditor.variants, { pack_size: "", price: "", mrp: "", sku: "", stock_qty: "0", batch_no: "", expiry_date: "" }] })}><PlusIcon className="size-4" />Add pack</button>
               </div>
               <div className="space-y-3">
                 {productEditor.variants.map((variant, index) => (
-                  <div key={index} className="grid gap-3 rounded-2xl bg-paper-100 p-3 sm:grid-cols-2 lg:grid-cols-4">
+                  <div key={index} className="grid min-w-0 gap-3 rounded-2xl bg-paper-100 p-3 sm:grid-cols-2 lg:grid-cols-4">
                     {([
                       ["pack_size", "Pack size", "100 g"],
                       ["sku", "SKU", "MAS-100"],
@@ -1960,7 +2054,7 @@ export default function AdminDashboard() {
             {categoryEditor !== "new" && categoryEditor.image_url && !categoryImageFile ? (
               <SmartImage src={categoryEditor.image_url} alt={categoryEditor.name} aspect="aspect-[16/7]" sizes="(max-width: 640px) 100vw, 50vw" wrapperClassName="rounded-xl" zoom={false} />
             ) : null}
-            <div className="flex justify-end gap-2"><button type="button" className={secondaryButton} onClick={() => { setCategoryEditor(null); setCategoryImageFile(null); }}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save category</button></div>
+            <div className="flex flex-col-reverse gap-2 border-t border-paper-200 pt-4 sm:flex-row sm:justify-end"><button type="button" className={`${secondaryButton} w-full sm:w-auto`} onClick={() => { setCategoryEditor(null); setCategoryImageFile(null); }}>Cancel</button><button type="submit" className={`${primaryButton} w-full sm:w-auto`} disabled={busy}>Save category</button></div>
           </form>
         </Modal>
       ) : null}
@@ -1986,7 +2080,7 @@ export default function AdminDashboard() {
               };
               return (
                 <>
-                  <div className="grid items-start gap-x-4 gap-y-4 sm:grid-cols-2">
+                  <div className="grid min-w-0 items-start gap-x-4 gap-y-4 sm:grid-cols-2">
                     <label className={labelClass}>Offer code<input name="code" required defaultValue={draft.code} className={fieldClass} /></label>
                     <label className={labelClass}>Offer title<input name="label" defaultValue={draft.label} className={fieldClass} placeholder="Optional display title" /></label>
                     <label className={labelClass}>Offer type<SelectField name="kind" value={couponKind} onChange={(event) => setCouponKind(event.target.value as AdminCoupon["kind"])}><option value="percentage">Percentage off</option><option value="fixed">Amount off</option><option value="buy_x_get_y">Buy X, get Y free</option></SelectField></label>
@@ -2006,14 +2100,14 @@ export default function AdminDashboard() {
                   </div>
                   <section className="rounded-xl border border-paper-200 bg-white p-4">
                     <h3 className="text-sm font-semibold text-ink-800">Schedule and eligibility</h3>
-                    <div className="mt-3 grid items-start gap-4 sm:grid-cols-2">
+                    <div className="mt-3 grid min-w-0 items-start gap-4 sm:grid-cols-2">
                       <label className={labelClass}>Starts<input name="active_from" type="date" defaultValue={draft.active_from} className={fieldClass} /></label>
                       <label className={labelClass}>Ends<input name="active_until" type="date" defaultValue={draft.active_until} className={fieldClass} /></label>
                       <label className={labelClass}>Maximum discount (₹)<input name="max_discount" min="0" type="number" step="0.01" defaultValue={draft.max_discount} className={fieldClass} /></label>
                       <label className="flex min-h-16 items-center gap-3 self-end rounded-xl border border-paper-200 bg-paper-50 px-4 py-3 text-sm font-semibold text-ink-700"><input name="first_order_only" type="checkbox" defaultChecked={draft.first_order_only} className="size-4 shrink-0 accent-masala-700" /> First order only</label>
                     </div>
                   </section>
-                  <div className="flex justify-end gap-2 border-t border-paper-200 pt-4"><button type="button" className={secondaryButton} onClick={() => setCouponEditor(null)}>Cancel</button><button type="submit" className={primaryButton} disabled={busy}>Save offer</button></div>
+                  <div className="flex flex-col-reverse gap-2 border-t border-paper-200 pt-4 sm:flex-row sm:justify-end"><button type="button" className={`${secondaryButton} w-full sm:w-auto`} onClick={() => setCouponEditor(null)}>Cancel</button><button type="submit" className={`${primaryButton} w-full sm:w-auto`} disabled={busy}>Save offer</button></div>
                 </>
               );
             })()}

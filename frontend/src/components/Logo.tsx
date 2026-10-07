@@ -30,11 +30,12 @@ type Props = {
   tone?: "light" | "dark" | "footer";
   /** Hide the wordmark — used in the mobile drawer / compact states. */
   markOnly?: boolean;
+  compact?: boolean;
   className?: string;
   href?: string;
 };
 
-export function Logo({ tone = "light", markOnly = false, className, href = "/" }: Props) {
+export function Logo({ tone = "light", markOnly = false, compact = false, className, href = "/" }: Props) {
   const dark = tone === "dark";
   const footer = tone === "footer";
 
@@ -42,15 +43,16 @@ export function Logo({ tone = "light", markOnly = false, className, href = "/" }
     <Link
       href={href}
       aria-label="Masala House — home"
-      className={cn("group inline-flex items-center gap-2.5", className)}
+      className={cn("group inline-flex items-center gap-2.5", compact && "max-[374px]:gap-1.5", className)}
     >
       <span
         className={cn(
           "grid size-9 shrink-0 place-items-center rounded-[0.7rem] transition-transform duration-300 group-hover:rotate-[20deg]",
+          compact && "max-[374px]:size-8",
           dark || footer ? "bg-saffron-400 text-ink-950" : "bg-masala-700 text-saffron-300",
         )}
       >
-        <StarAniseMark className="size-[1.35rem]" />
+        <StarAniseMark className={cn("size-[1.35rem]", compact && "max-[374px]:size-5")} />
       </span>
 
       {!markOnly ? (
@@ -58,6 +60,7 @@ export function Logo({ tone = "light", markOnly = false, className, href = "/" }
           <span
             className={cn(
               "font-display text-[1.3rem] font-semibold tracking-tight",
+              compact && "max-[374px]:text-base",
               footer ? "text-[#2D1810]" : dark ? "text-paper-50" : "text-ink-950",
             )}
           >
