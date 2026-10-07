@@ -47,6 +47,7 @@ from app.modules.orders.shipping import calculate_shipping
 from app.modules.products.router import hydrate_products
 from app.modules.recipes.router import _recipe_response
 from app.modules.recipes.schemas import RecipeInput
+from app.services.media_cleanup import delete_unreferenced_objects
 from app.services.storage import (
     build_image_filename,
     build_unique_object_key,
@@ -234,13 +235,11 @@ async def delete_hero_image(image_id: UUID, db: AsyncSession = Depends(get_db)) 
 
     await db.execute(delete(hero_images_table).where(hero_images_table.c.id == image_id))
     await db.commit()
-    try:
-        delete_object(object_key)
-    except Exception:
-        logger.exception(
-            "Failed to delete removed homepage hero image from RustFS.",
-            extra={"image_id": str(image_id), "object_key": object_key},
-        )
+    await delete_unreferenced_objects(
+        db,
+        {object_key},
+        context=f"hero-image:{image_id}",
+    )
     return Response(status_code=204)
 
 
@@ -637,31 +636,6 @@ def _dump_product(payload: ProductInput | ComboInput) -> dict[str, Any]:
     return product
 
 
-def _delete_replaced_product_images(
-    product_id: UUID,
-    previous_images: list[str] | None,
-    current_images: list[str],
-) -> None:
-    retained_keys = {
-        key
-        for image in current_images
-        if (key := get_object_key(image)) is not None
-    }
-    previous_keys = {
-        key
-        for image in (previous_images or [])
-        if (key := get_object_key(image)) is not None
-    }
-    for object_key in previous_keys - retained_keys:
-        try:
-            delete_object(object_key)
-        except Exception:
-            logger.exception(
-                "Failed to delete replaced product image from RustFS.",
-                extra={"product_id": str(product_id), "object_key": object_key},
-            )
-
-
 def _coupon_payload(payload: CouponInput) -> dict[str, Any]:
     values = payload.model_dump(exclude={
         "percentage", "fixed_amount", "active_from", "active_until", "is_active"
@@ -944,10 +918,20 @@ async def update_product(product_id: UUID, payload: ProductInput, db: AsyncSessi
         await db.commit()
     except IntegrityError as exc:
         await _unique_error(db, exc)
-    _delete_replaced_product_images(
-        product_id,
-        previous_product["images"],
-        values["images"],
+    previous_image_keys = {
+        key
+        for image in (previous_product["images"] or [])
+        if (key := get_object_key(image)) is not None
+    }
+    current_image_keys = {
+        key
+        for image in values["images"]
+        if (key := get_object_key(image)) is not None
+    }
+    await delete_unreferenced_objects(
+        db,
+        previous_image_keys - current_image_keys,
+        context=f"product:{product_id}",
     )
     result = await db.execute(select(products_table).where(products_table.c.id == product_id))
     return (await hydrate_products(db, [dict(result.mappings().one())]))[0]
@@ -955,6 +939,14 @@ async def update_product(product_id: UUID, payload: ProductInput, db: AsyncSessi
 
 @router.delete("/products/{product_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
+    existing = await db.execute(
+        select(products_table.c.images).where(products_table.c.id == product_id)
+    )
+    previous_images = existing.scalar_one_or_none()
+    if previous_images is None and not await db.scalar(
+        select(products_table.c.id).where(products_table.c.id == product_id)
+    ):
+        raise HTTPException(status_code=404, detail="Product not found.")
     combo_reference = await db.execute(
         select(combos_table.c.id, combos_table.c.catalog_products)
     )
@@ -971,6 +963,15 @@ async def delete_product(product_id: UUID, db: AsyncSession = Depends(get_db)) -
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Product not found.")
     await db.commit()
+    await delete_unreferenced_objects(
+        db,
+        {
+            key
+            for image in (previous_images or [])
+            if (key := get_object_key(image)) is not None
+        },
+        context=f"product:{product_id}",
+    )
 
 
 @router.get("/combos", dependencies=[Depends(require_admin)])
@@ -1036,10 +1037,20 @@ async def update_combo(
         await db.commit()
     except IntegrityError as exc:
         await _unique_error(db, exc)
-    _delete_replaced_product_images(
-        combo_id,
-        previous_combo["images"],
-        values["images"],
+    previous_image_keys = {
+        key
+        for image in (previous_combo["images"] or [])
+        if (key := get_object_key(image)) is not None
+    }
+    current_image_keys = {
+        key
+        for image in values["images"]
+        if (key := get_object_key(image)) is not None
+    }
+    await delete_unreferenced_objects(
+        db,
+        previous_image_keys - current_image_keys,
+        context=f"combo:{combo_id}",
     )
     result = await db.execute(select(combos_table).where(combos_table.c.id == combo_id))
     combo = {**dict(result.mappings().one()), "is_combo": True, "ingredients": []}
@@ -1048,10 +1059,27 @@ async def update_combo(
 
 @router.delete("/combos/{combo_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_combo(combo_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
+    existing = await db.execute(
+        select(combos_table.c.images).where(combos_table.c.id == combo_id)
+    )
+    previous_images = existing.scalar_one_or_none()
+    if previous_images is None and not await db.scalar(
+        select(combos_table.c.id).where(combos_table.c.id == combo_id)
+    ):
+        raise HTTPException(status_code=404, detail="Combo not found.")
     result = await db.execute(delete(combos_table).where(combos_table.c.id == combo_id))
     if not result.rowcount:
         raise HTTPException(status_code=404, detail="Combo not found.")
     await db.commit()
+    await delete_unreferenced_objects(
+        db,
+        {
+            key
+            for image in (previous_images or [])
+            if (key := get_object_key(image)) is not None
+        },
+        context=f"combo:{combo_id}",
+    )
 
 
 @router.get("/recipes", dependencies=[Depends(require_admin)])
@@ -1133,11 +1161,13 @@ async def update_recipe(
 ) -> dict[str, Any]:
     try:
         previous_result = await db.execute(
-            select(recipes_table.c.slug).where(recipes_table.c.id == recipe_id)
+            select(recipes_table.c.slug, recipes_table.c.hero_image_url)
+            .where(recipes_table.c.id == recipe_id)
         )
-        old_slug = previous_result.scalar_one_or_none()
-        if old_slug is None:
+        previous_recipe = previous_result.mappings().first()
+        if previous_recipe is None:
             raise HTTPException(status_code=404, detail="Recipe not found.")
+        old_slug = previous_recipe["slug"]
         result = await db.execute(
             update(recipes_table)
             .where(recipes_table.c.id == recipe_id)
@@ -1153,6 +1183,18 @@ async def update_recipe(
         if old_slug != payload.slug:
             await _update_recipe_homepage_references(db, old_slug, payload.slug)
         await db.commit()
+        previous_image_key = get_object_key(previous_recipe["hero_image_url"])
+        current_image_key = get_object_key(payload.hero_image_key)
+        replaced_image_keys = (
+            {previous_image_key} - {current_image_key}
+            if previous_image_key
+            else set()
+        )
+        await delete_unreferenced_objects(
+            db,
+            replaced_image_keys,
+            context=f"recipe:{recipe_id}",
+        )
         return dict(recipe)
     except IntegrityError as exc:
         await db.rollback()
@@ -1165,14 +1207,21 @@ async def update_recipe(
 @router.delete("/recipes/{recipe_id}", status_code=204, dependencies=[Depends(require_admin)])
 async def delete_recipe(recipe_id: UUID, db: AsyncSession = Depends(get_db)) -> None:
     recipe_result = await db.execute(
-        select(recipes_table.c.slug).where(recipes_table.c.id == recipe_id)
+        select(recipes_table.c.slug, recipes_table.c.hero_image_url)
+        .where(recipes_table.c.id == recipe_id)
     )
-    slug = recipe_result.scalar_one_or_none()
-    if slug is None:
+    recipe = recipe_result.mappings().first()
+    if recipe is None:
         raise HTTPException(status_code=404, detail="Recipe not found.")
     await db.execute(delete(recipes_table).where(recipes_table.c.id == recipe_id))
-    await _update_recipe_homepage_references(db, slug, None)
+    await _update_recipe_homepage_references(db, recipe["slug"], None)
     await db.commit()
+    image_key = get_object_key(recipe["hero_image_url"])
+    await delete_unreferenced_objects(
+        db,
+        {image_key} if image_key else set(),
+        context=f"recipe:{recipe_id}",
+    )
 
 
 @router.get("/categories", dependencies=[Depends(require_admin)])
@@ -1210,18 +1259,15 @@ async def update_category(category_id: UUID, payload: CategoryInput, db: AsyncSe
     category = result.mappings().first()
     if category is None:
         raise HTTPException(status_code=404, detail="Category not found.")
-    updated_category = await category_response(category)
     if previous_image_key and previous_image_key != payload.image_key:
         object_key = get_object_key(previous_image_key)
         if object_key:
-            try:
-                await asyncio.to_thread(delete_object, object_key)
-            except Exception:
-                logger.exception(
-                    "Failed to delete replaced collection image from RustFS.",
-                    extra={"category_id": str(category_id), "object_key": object_key},
-                )
-    return updated_category
+            await delete_unreferenced_objects(
+                db,
+                {object_key},
+                context=f"category:{category_id}",
+            )
+    return await category_response(category)
 
 
 @router.delete("/categories/{category_id}", status_code=204, dependencies=[Depends(require_admin)])
@@ -1236,13 +1282,11 @@ async def delete_category(category_id: UUID, db: AsyncSession = Depends(get_db))
     await db.commit()
     object_key = get_object_key(image_key)
     if object_key:
-        try:
-            await asyncio.to_thread(delete_object, object_key)
-        except Exception:
-            logger.exception(
-                "Failed to delete removed collection image from RustFS.",
-                extra={"category_id": str(category_id), "object_key": object_key},
-            )
+        await delete_unreferenced_objects(
+            db,
+            {object_key},
+            context=f"category:{category_id}",
+        )
 
 
 @router.get("/orders", dependencies=[Depends(require_admin)])

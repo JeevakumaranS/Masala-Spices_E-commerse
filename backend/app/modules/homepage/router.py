@@ -17,10 +17,12 @@ from app.core.database import (
 )
 from app.modules.admin.auth import require_admin
 from app.modules.homepage.schemas import DEFAULT_HOME_PAGE_CONTENT, HomePageContent
+from app.services.media_cleanup import delete_unreferenced_objects
 from app.services.storage import (
     build_image_filename,
     build_unique_object_key,
     get_file_url,
+    get_object_key,
     upload_file,
 )
 
@@ -114,6 +116,7 @@ async def save_homepage_content(
     payload: HomePageContent,
     db: AsyncSession = Depends(get_db),
 ) -> dict:
+    previous_content = (await _load_content(db)).model_dump(mode="json")
     content = payload.model_dump(mode="json")
     for item in content["categories"]["items"]:
         if item["image_url"]:
@@ -151,6 +154,21 @@ async def save_homepage_content(
         await db.rollback()
         logger.exception("Failed to persist homepage settings.")
         raise
+    previous_image_keys = {
+        key
+        for item in previous_content["categories"]["items"]
+        if (key := get_object_key(item["image_key"])) is not None
+    }
+    current_image_keys = {
+        key
+        for item in content["categories"]["items"]
+        if (key := get_object_key(item["image_key"])) is not None
+    }
+    await delete_unreferenced_objects(
+        db,
+        previous_image_keys - current_image_keys,
+        context="homepage-content",
+    )
     return await _content_response(db)
 
 
