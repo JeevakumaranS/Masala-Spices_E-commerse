@@ -37,16 +37,37 @@ export async function getCategories(): Promise<Category[]> {
 }
 
 export async function getProducts(category?: string): Promise<Product[]> {
-  const path = category
-    ? `/api/products?category=${encodeURIComponent(category)}`
-    : "/api/products";
-  const payload = await fetchJson<{ items?: Product[] } | Product[]>(
-    path,
-    [],
-    false,
-  );
-  if (!payload) return [];
-  return Array.isArray(payload) ? payload : (payload.items ?? []);
+  const pageSize = 100;
+  const params = { page: 1, page_size: pageSize, ...(category ? { category } : {}) };
+
+  try {
+    const firstPage = await apiClient.get<{
+      items?: Product[];
+      total_count?: number;
+    } | Product[]>("/api/products", { params });
+    if (Array.isArray(firstPage.data)) return firstPage.data;
+
+    const items = firstPage.data.items ?? [];
+    const totalPages = Math.ceil((firstPage.data.total_count ?? items.length) / pageSize);
+    if (totalPages <= 1) return items;
+
+    const remainingPages = await Promise.all(
+      Array.from({ length: totalPages - 1 }, (_, index) =>
+        apiClient.get<{ items?: Product[] } | Product[]>("/api/products", {
+          params: { ...params, page: index + 2 },
+        }),
+      ),
+    );
+
+    return [
+      ...items,
+      ...remainingPages.flatMap(({ data }) =>
+        Array.isArray(data) ? data : (data.items ?? []),
+      ),
+    ];
+  } catch {
+    return [];
+  }
 }
 
 export async function getAllCombos(): Promise<Product[]> {

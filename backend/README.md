@@ -103,8 +103,11 @@ default.
 Anonymous storefront sessions use an HttpOnly `guest_id` cookie. Cart and
 watchlist contents are persisted against that guest in the database, while
 prices and inventory are refreshed from the catalog and revalidated at
-checkout. `GET` and `PUT /api/cart` exchange the current cart-line array
-(writes accept product IDs, optional variant IDs, and quantities only);
+checkout. `GET /api/guest/session` establishes the cookie before cart and
+watchlist requests; only that endpoint, cart, watchlist, and order placement
+create or update a guest session. `GET` and `PUT /api/cart` exchange the
+current cart-line array (writes accept product IDs, optional variant IDs, and
+quantities only);
 `GET` and `PUT /api/watchlist` exchange the current product-slug array. To
 remove sessions inactive for more than 90 days that have no orders, schedule
 `python -m app.scripts.cleanup_guests` from the `backend` directory to run
