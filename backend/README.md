@@ -96,9 +96,16 @@ exactly five digits (for example, `MAS-00001`); guest tracking checks the
 reference together with the checkout phone number. Admins move orders through
 placed, processing, shipped, and delivered in order. A courier partner and
 tracking ID are required before shipping; both appear in guest order tracking.
-Brevo sends a status-specific customer email at order placement and on each
-subsequent status transition. Review submissions are pending moderation by
-default.
+Google Apps Script sends a status-specific customer email at order placement
+and on each subsequent status transition. Set `GOOGLE_APPS_SCRIPT_URL` in
+`backend/.env` to the deployed HTTPS web-app URL. The admin settings can also
+specify a sender email address, which is sent to Apps Script as `senderEmail`.
+To use it as the actual From address, configure it as a send-as alias on the
+Google account running the script and update the script to pass that alias as
+the `from` option to `GmailApp.sendEmail`; otherwise Apps Script will continue
+using its default sender. The endpoint also receives `to`, `subject`, and
+`html`, and returns a JSON success response. Review submissions are pending
+moderation by default.
 
 Anonymous storefront sessions use an HttpOnly `guest_id` cookie. Cart and
 watchlist contents are persisted against that guest in the database, while
@@ -135,15 +142,15 @@ and returns `{ "access_token": "...", "token_type": "bearer" }`.
 The first account can be registered without authentication; subsequent
 registrations require an admin bearer token.
 `GET /api/admin/admins` lists account metadata for authenticated admins.
-`GET /api/admin/integration-settings` reports notification configuration
-without returning provider secrets; `PUT /api/admin/integration-settings`
-updates provider credentials, sender details, and enable/disable flags.
-Notification settings are stored in a dedicated database table, with API
-credentials stored in that table. Configure both Twilio SMS and Brevo
-transactional email from Admin → API & notifications. The dashboard masks
-provider credentials by default and allows administrators to reveal them.
+`GET /api/admin/integration-settings` reports SMS configuration without
+returning provider secrets; `PUT /api/admin/integration-settings` updates
+Twilio credentials and enable/disable flags. Configure Twilio SMS from
+Admin → API & notifications. Transactional email uses the
+`GOOGLE_APPS_SCRIPT_URL` environment variable. Admins can override that
+endpoint from Admin → API & notifications; email subjects and content use the
+built-in templates.
 Checkout requires the customer's email. Orders are saved before notifications
-are sent; provider failures are logged and reported as per-channel confirmation
+are sent; delivery failures are logged and reported as per-channel confirmation
 statuses without discarding the order.
 
 Homepage hero images are uploaded and managed from the admin panel's **Hero

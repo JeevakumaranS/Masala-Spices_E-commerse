@@ -1,10 +1,9 @@
-"""Newsletter signup validation and email-delivery behavior."""
+"""Newsletter signup validation and Apps Script email-delivery behavior."""
 
 import asyncio
 from collections import defaultdict, deque
 from typing import Any
 
-import httpx
 import pytest
 from fastapi import HTTPException, Request
 from fastapi.testclient import TestClient
@@ -13,11 +12,11 @@ from app.core.application import create_app
 from app.core.database import updates_table
 from app.modules.newsletter import router as newsletter_router
 from app.modules.newsletter.router import NewsletterSignup, _enforce_signup_limit
-from app.modules.notifications import brevo
+from app.modules.notifications import email as email_notifications
 from app.modules.notifications.settings import NotificationSettings
 
 
-def mock_database_notification_settings(
+def mock_email_settings(
     monkeypatch: pytest.MonkeyPatch,
     settings: NotificationSettings,
 ) -> None:
@@ -31,45 +30,13 @@ def mock_database_notification_settings(
     async def load_settings(_db: object) -> NotificationSettings:
         return settings
 
-    monkeypatch.setattr(brevo, "session_factory", SessionContext)
-    monkeypatch.setattr(brevo, "get_notification_settings", load_settings)
+    monkeypatch.setattr(email_notifications, "session_factory", SessionContext)
+    monkeypatch.setattr(email_notifications, "get_notification_settings", load_settings)
 
 
 def test_newsletter_table_has_unique_email_and_delivery_timestamp() -> None:
     assert updates_table.c.email.unique is True
     assert updates_table.c.confirmation_sent_at.nullable is True
-
-
-def test_admin_notification_settings_include_keys_for_controlled_reveal() -> None:
-    settings = NotificationSettings(
-        sms_enabled=True,
-        sms_account_sid="AC123",
-        sms_auth_token="twilio-private",
-        sms_sender_phone="+14155550123",
-        email_enabled=True,
-        email_api_key="brevo-private",
-        email_sender_name="Masala House",
-        email_sender_email="hello@example.com",
-    )
-
-    assert settings.sms_configured
-    assert settings.email_configured
-    assert settings.admin_response() == {
-        "sms_enabled": True,
-        "sms_configured": True,
-        "sms_account_sid": "AC123",
-        "sms_auth_token": "twilio-private",
-        "sms_sender_phone": "+14155550123",
-        "sms_account_sid_configured": True,
-        "email_enabled": True,
-        "email_configured": True,
-        "email_api_key": "brevo-private",
-        "email_api_key_configured": True,
-        "email_sender_name": "Masala House",
-        "email_sender_email": "hello@example.com",
-    }
-    assert settings.admin_response()["sms_auth_token"] == "twilio-private"
-    assert settings.admin_response()["email_api_key"] == "brevo-private"
 
 
 def test_newsletter_endpoint_is_registered_and_normalizes_email() -> None:
@@ -96,128 +63,119 @@ def test_newsletter_signup_rate_limit_is_bounded(monkeypatch: pytest.MonkeyPatch
     assert error.value.status_code == 429
 
 
-def test_newsletter_email_reports_disabled_when_brevo_is_not_configured(
+def test_newsletter_email_reports_disabled_without_apps_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    mock_database_notification_settings(
-        monkeypatch,
-        NotificationSettings(False, "", "", "", False, "", "", ""),
-    )
+    mock_email_settings(monkeypatch, NotificationSettings(False, "", "", ""))
+
     result = asyncio.run(
-        brevo.send_newsletter_signup_email("person@example.com")
+        email_notifications.send_newsletter_signup_email("person@example.com")
     )
 
     assert result == "disabled"
 
 
-def test_newsletter_email_posts_to_brevo_when_enabled(
+def test_newsletter_email_sends_html_through_apps_script(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     request: dict[str, Any] = {}
-    mock_database_notification_settings(
+    mock_email_settings(
         monkeypatch,
         NotificationSettings(
-            False, "", "", "", True, "test-api-key", "Masala House",
-            "hello@example.com",
+            False,
+            "",
+            "",
+            "",
+            google_apps_script_url="https://script.google.com/macros/s/test/exec",
+            email_sender_email="orders@example.com",
         ),
     )
 
-    class SuccessfulResponse:
-        is_error = False
-        status_code = 201
+    async def record_send(
+        to: str,
+        subject: str,
+        html: str,
+        *,
+        endpoint: str | None = None,
+        sender_email: str = "",
+    ) -> dict[str, bool]:
+        request.update(to=to, subject=subject, html=html)
+        request["endpoint"] = endpoint
+        request["sender_email"] = sender_email
+        return {"success": True}
 
-        @staticmethod
-        def raise_for_status() -> None:
-            return None
-
-    class RecordingClient:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> "RecordingClient":
-            return self
-
-        async def __aexit__(self, *_args: object) -> None:
-            return None
-
-        async def post(
-            self,
-            url: str,
-            *,
-            headers: dict[str, str],
-            json: dict[str, Any],
-        ) -> SuccessfulResponse:
-            assert headers["api-key"] == "test-api-key"
-            request["url"] = url
-            request["json"] = json
-            return SuccessfulResponse()
-
-    monkeypatch.setattr(brevo.httpx, "AsyncClient", RecordingClient)
+    monkeypatch.setattr(email_notifications, "send_email", record_send)
 
     result = asyncio.run(
-        brevo.send_newsletter_signup_email("person@example.com")
+        email_notifications.send_newsletter_signup_email("person@example.com")
     )
 
     assert result == "sent"
-    assert request["url"] == brevo._BREVO_TRANSACTIONAL_EMAIL_URL
-    assert request["json"]["to"] == [{
-        "email": "person@example.com",
-        "name": "Newsletter subscriber",
-    }]
+    assert request["to"] == "person@example.com"
+    assert request["subject"] == "You’re on the Masala House list"
+    assert "Welcome to Masala House" in request["html"]
+    assert request["endpoint"] == "https://script.google.com/macros/s/test/exec"
+    assert request["sender_email"] == "orders@example.com"
 
 
-def test_brevo_failure_logs_provider_reason_without_recipient(
+def test_order_confirmation_email_uses_apps_script(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
-    recipient = "person@example.com"
-    sender = "hello@example.com"
-    mock_database_notification_settings(
+    request: dict[str, Any] = {}
+    mock_email_settings(
         monkeypatch,
         NotificationSettings(
-            False, "", "", "", True, "test-api-key", "Masala House", sender,
+            False,
+            "",
+            "",
+            "",
+            google_apps_script_url="https://script.google.com/macros/s/test/exec",
+            email_sender_email="orders@example.com",
         ),
     )
 
-    class RejectedResponse:
-        is_error = True
-        status_code = 400
+    async def record_send(
+        to: str,
+        subject: str,
+        html: str,
+        *,
+        endpoint: str | None = None,
+        sender_email: str = "",
+    ) -> dict[str, bool]:
+        request.update(to=to, subject=subject, html=html)
+        request["endpoint"] = endpoint
+        request["sender_email"] = sender_email
+        return {"success": True}
 
-        @staticmethod
-        def json() -> dict[str, str]:
-            return {
-                "code": "invalid_parameter",
-                "message": f"Sender {sender} cannot email {recipient}.",
-            }
-
-        def raise_for_status(self) -> None:
-            request = httpx.Request("POST", brevo._BREVO_TRANSACTIONAL_EMAIL_URL)
-            response = httpx.Response(400, request=request)
-            raise httpx.HTTPStatusError("400 Bad Request", request=request, response=response)
-
-    class RejectingClient:
-        def __init__(self, **_kwargs: object) -> None:
-            pass
-
-        async def __aenter__(self) -> "RejectingClient":
-            return self
-
-        async def __aexit__(self, *_args: object) -> None:
-            return None
-
-        async def post(self, *_args: object, **_kwargs: object) -> RejectedResponse:
-            return RejectedResponse()
-
-    monkeypatch.setattr(brevo.httpx, "AsyncClient", RejectingClient)
+    monkeypatch.setattr(email_notifications, "send_email", record_send)
 
     result = asyncio.run(
-        brevo.send_newsletter_signup_email(recipient)
+        email_notifications.send_order_confirmation_email(
+            {
+                "email": "customer@example.com",
+                "customer_name": "Masala Customer",
+                "order_number": "MH-1001",
+                "items": [
+                    {
+                        "name": "Sambar Masala",
+                        "pack_size": "100g",
+                        "qty": 2,
+                        "line_total": 240,
+                    }
+                ],
+                "subtotal": 240,
+                "discount_amount": 0,
+                "shipping_amount": 0,
+                "total": 240,
+            }
+        )
     )
 
-    assert result == "failed"
-    assert "HTTP 400 (code=invalid_parameter)" in caplog.text
-    assert recipient not in caplog.text
-    assert sender not in caplog.text
+    assert result == "sent"
+    assert request["to"] == "customer@example.com"
+    assert request["subject"] == "Order confirmation — Masala House"
+    assert "Thank you, Masala Customer" in request["html"]
+    assert "Sambar Masala" in request["html"]
 
 
 def test_newsletter_signup_attempts_email_for_unconfirmed_subscription(

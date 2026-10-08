@@ -14,7 +14,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db, updates_table
-from app.modules.notifications.brevo import send_newsletter_signup_email
+from app.modules.notifications.email import send_newsletter_signup_email
 
 router = APIRouter(prefix="/api/updates", tags=["updates"])
 logger = logging.getLogger(__name__)
@@ -85,7 +85,7 @@ async def signup_for_updates(
 
         email_status: Literal["sent", "already_sent", "failed", "disabled"] = "already_sent"
         if subscription["confirmation_sent_at"] is None:
-            logger.info("Attempting Brevo newsletter confirmation delivery.")
+            logger.info("Attempting newsletter confirmation email delivery.")
             email_status = await send_newsletter_signup_email(payload.email)
             if email_status == "sent":
                 await db.execute(

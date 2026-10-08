@@ -161,6 +161,7 @@ notification_settings_table = Table(
     Column("email_api_key", Text),
     Column("email_sender_name", String(255)),
     Column("email_sender_email", String(320)),
+    Column("google_apps_script_url", Text),
     CheckConstraint("id = 1", name="ck_notification_settings_singleton"),
 )
 guest_sessions_table = Table(

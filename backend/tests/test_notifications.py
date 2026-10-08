@@ -21,10 +21,6 @@ def test_twilio_sends_using_environment_credentials(
         sms_account_sid="AC" + "1" * 32,
         sms_auth_token="database-auth-token",
         sms_sender_phone="+14155550123",
-        email_enabled=False,
-        email_api_key="",
-        email_sender_name="",
-        email_sender_email="",
     )
 
     async def load_settings(_db: object) -> NotificationSettings:
@@ -84,7 +80,7 @@ def test_twilio_sends_using_environment_credentials(
     assert request["data"]["From"] == "+14155550123"
 
 
-def test_admin_can_manage_database_notification_settings_and_reveal_keys() -> None:
+def test_admin_can_manage_database_sms_settings() -> None:
     class StoredValue:
         def __init__(self, row: dict[str, Any]) -> None:
             self.row = row
@@ -106,9 +102,7 @@ def test_admin_can_manage_database_notification_settings_and_reveal_keys() -> No
                     "sms_account_sid",
                     "sms_auth_token",
                     "sms_sender_phone",
-                    "email_enabled",
-                    "email_api_key",
-                    "email_sender_name",
+                    "google_apps_script_url",
                     "email_sender_email",
                 ):
                     if params[key] is not None or key not in self.row:
@@ -136,32 +130,47 @@ def test_admin_can_manage_database_notification_settings_and_reveal_keys() -> No
                     "sms_account_sid": "AC123",
                     "sms_auth_token": "twilio-private",
                     "sms_sender_phone": "+14155550123",
-                    "email_enabled": True,
-                    "email_api_key": "brevo-private",
-                    "email_sender_name": "Masala House",
-                    "email_sender_email": "hello@example.com",
+                    "google_apps_script_url": "https://script.google.com/macros/s/test/exec",
+                    "email_sender_email": "orders@example.com",
                 },
             )
             assert response.status_code == 200, response.text
             assert response.json()["sms_enabled"] is True
-            assert response.json()["email_enabled"] is True
             assert response.json()["sms_configured"] is True
-            assert response.json()["email_configured"] is True
-            assert response.json()["email_api_key_configured"] is True
-            assert response.json()["email_api_key"] == "brevo-private"
             assert response.json()["sms_auth_token"] == "twilio-private"
+            assert response.json()["google_apps_script_url"] == (
+                "https://script.google.com/macros/s/test/exec"
+            )
+            assert response.json()["email_sender_email"] == "orders@example.com"
+            assert session.row["email_sender_email"] == "orders@example.com"
+            assert "order_confirmation_template" not in response.json()
             assert session.row["sms_auth_token"] == "twilio-private"
-            assert session.row["email_api_key"] == "brevo-private"
+            assert "email_api_key" not in response.json()
 
             settings = client.get("/api/admin/integration-settings")
             assert settings.status_code == 200, settings.text
-            assert settings.json()["email_api_key_configured"] is True
             assert settings.json()["sms_enabled"] is True
-            assert settings.json()["email_enabled"] is True
-            assert settings.json()["email_api_key"] == "brevo-private"
+            assert "email_api_key" not in settings.json()
             assert settings.json()["sms_auth_token"] == "twilio-private"
 
-            old_email_key = session.row["email_api_key"]
+            invalid_url = client.put(
+                "/api/admin/integration-settings",
+                json={
+                    "sms_enabled": False,
+                    "google_apps_script_url": "http://127.0.0.1/internal",
+                },
+            )
+            assert invalid_url.status_code == 422
+
+            invalid_sender = client.put(
+                "/api/admin/integration-settings",
+                json={
+                    "sms_enabled": False,
+                    "email_sender_email": "not-an-email",
+                },
+            )
+            assert invalid_sender.status_code == 422
+
             old_twilio_token = session.row["sms_auth_token"]
             disabled = client.put(
                 "/api/admin/integration-settings",
@@ -169,16 +178,12 @@ def test_admin_can_manage_database_notification_settings_and_reveal_keys() -> No
                     "sms_enabled": False,
                     "sms_account_sid": "AC123",
                     "sms_sender_phone": "+14155550123",
-                    "email_enabled": False,
-                    "email_sender_name": "Masala House",
-                    "email_sender_email": "hello@example.com",
+                    "google_apps_script_url": "",
+                    "email_sender_email": "",
                 },
             )
             assert disabled.status_code == 200, disabled.text
             assert disabled.json()["sms_enabled"] is False
-            assert disabled.json()["email_enabled"] is False
-            assert disabled.json()["email_api_key_configured"] is True
-            assert session.row["email_api_key"] == old_email_key
             assert session.row["sms_auth_token"] == old_twilio_token
     finally:
         application.dependency_overrides.clear()

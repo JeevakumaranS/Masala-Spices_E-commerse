@@ -40,7 +40,7 @@ from app.modules.orders.shipping import (
     get_international_destination,
     shipping_options_payload,
 )
-from app.modules.notifications.brevo import send_order_confirmation_email
+from app.modules.notifications.email import send_order_confirmation_email
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 

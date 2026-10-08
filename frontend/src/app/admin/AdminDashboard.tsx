@@ -456,14 +456,11 @@ export default function AdminDashboard() {
     sms_enabled: false,
     sms_account_sid: "",
     sms_sender_phone: "",
-    email_enabled: false,
-    email_sender_name: "",
-    email_sender_email: "",
   });
+  const [googleAppsScriptUrl, setGoogleAppsScriptUrl] = useState("");
+  const [emailSenderEmail, setEmailSenderEmail] = useState("");
   const [smsAuthTokenDraft, setSmsAuthTokenDraft] = useState("");
-  const [emailApiKeyDraft, setEmailApiKeyDraft] = useState("");
   const [showSmsAuthToken, setShowSmsAuthToken] = useState(false);
-  const [showEmailApiKey, setShowEmailApiKey] = useState(false);
   const [loadErrors, setLoadErrors] = useState<string[]>([]);
   const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(false);
@@ -589,14 +586,11 @@ export default function AdminDashboard() {
           sms_enabled: settings.sms_enabled,
           sms_account_sid: settings.sms_account_sid,
           sms_sender_phone: settings.sms_sender_phone,
-          email_enabled: settings.email_enabled,
-          email_sender_name: settings.email_sender_name,
-          email_sender_email: settings.email_sender_email,
         });
+        setGoogleAppsScriptUrl(settings.google_apps_script_url);
+        setEmailSenderEmail(settings.email_sender_email);
         setSmsAuthTokenDraft(settings.sms_auth_token);
-        setEmailApiKeyDraft(settings.email_api_key);
         setShowSmsAuthToken(false);
-        setShowEmailApiKey(false);
         setIntegrationSettingsError("");
       } catch (error: unknown) {
         if (!cancelled) {
@@ -639,8 +633,9 @@ export default function AdminDashboard() {
           method: "PUT",
           body: JSON.stringify({
             ...notificationDraft,
+            google_apps_script_url: googleAppsScriptUrl,
+            email_sender_email: emailSenderEmail,
             sms_auth_token: smsAuthTokenDraft,
-            email_api_key: emailApiKeyDraft,
           }),
         },
       );
@@ -649,14 +644,11 @@ export default function AdminDashboard() {
         sms_enabled: settings.sms_enabled,
         sms_account_sid: settings.sms_account_sid,
         sms_sender_phone: settings.sms_sender_phone,
-        email_enabled: settings.email_enabled,
-        email_sender_name: settings.email_sender_name,
-        email_sender_email: settings.email_sender_email,
       });
+      setGoogleAppsScriptUrl(settings.google_apps_script_url);
+      setEmailSenderEmail(settings.email_sender_email);
       setSmsAuthTokenDraft(settings.sms_auth_token);
-      setEmailApiKeyDraft(settings.email_api_key);
       setShowSmsAuthToken(false);
-      setShowEmailApiKey(false);
       showToast("Notification settings saved.", "success");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Notification settings could not be saved.");
@@ -1669,7 +1661,7 @@ export default function AdminDashboard() {
         {section === "api" ? (
           <section className="mt-7 max-w-4xl space-y-5">
             <div className="rounded-2xl border border-saffron-200 bg-saffron-50 p-4 text-sm leading-relaxed text-ink-700">
-              Manage notification providers here. Provider keys are stored as plain text in the database; only admins can access this settings page. Keys are masked until revealed.
+              Configure Twilio SMS and the Apps Script email delivery endpoint here.
             </div>
             {integrationSettingsError ? (
               <p role="alert" className="rounded-xl border border-chili-100 bg-chili-50 px-4 py-3 text-sm text-chili-700">{integrationSettingsError}</p>
@@ -1679,7 +1671,7 @@ export default function AdminDashboard() {
             ) : null}
             {integrationSettings ? (
               <form className="space-y-5" onSubmit={saveNotificationSettings}>
-                <div className="grid gap-4 sm:grid-cols-2">
+                <div className="grid gap-4">
                   <section className="space-y-4 rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
                     <div className="flex items-center justify-between gap-4">
                       <h2 className="font-display text-xl font-semibold text-ink-950">Twilio SMS</h2>
@@ -1759,86 +1751,42 @@ export default function AdminDashboard() {
                       />
                     </label>
                   </section>
-
-                  <section className="space-y-4 rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
-                    <div className="flex items-center justify-between gap-4">
-                      <h2 className="font-display text-xl font-semibold text-ink-950">Brevo email</h2>
-                      <label className="flex items-center gap-2 text-sm font-medium text-ink-700">
-                        <input
-                          type="checkbox"
-                          checked={notificationDraft.email_enabled}
-                          onChange={(event) => setNotificationDraft((draft) => ({ ...draft, email_enabled: event.target.checked }))}
-                        />
-                        Enabled
-                      </label>
-                    </div>
-                    <p className="text-sm text-ink-600">
-                      Credentials: {integrationSettings.email_configured ? "Configured" : "Incomplete"}
-                    </p>
-                    <div>
-                      <label className={labelClass} htmlFor="brevo-api-key">API key</label>
-                      <div className="relative">
-                        <input
-                          id="brevo-api-key"
-                          type="text"
-                          autoComplete="off"
-                          className={`${fieldClass} pr-12`}
-                          value={showEmailApiKey || !emailApiKeyDraft ? emailApiKeyDraft : "***"}
-                          readOnly={!showEmailApiKey && Boolean(emailApiKeyDraft)}
-                          onChange={(event) => {
-                            setEmailApiKeyDraft(event.target.value);
-                            setShowEmailApiKey(true);
-                          }}
-                          placeholder="Enter Brevo API key"
-                        />
-                        {emailApiKeyDraft ? (
-                          <button
-                            type="button"
-                            className="absolute right-2 top-1/2 -translate-y-1/2 rounded-md p-2 text-ink-500 hover:text-ink-900"
-                            onClick={() => setShowEmailApiKey((visible) => !visible)}
-                            aria-label={showEmailApiKey ? "Hide Brevo API key" : "Show Brevo API key"}
-                            title={showEmailApiKey ? "Hide key" : "Show key"}
-                          >
-                            <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
-                              {showEmailApiKey ? (
-                                <>
-                                  <path d="M3 3l18 18" />
-                                  <path d="M10.6 10.6a2 2 0 002.8 2.8" />
-                                  <path d="M9.9 5.2A10.8 10.8 0 0112 5c5 0 9 4 10 7a10.8 10.8 0 01-2.6 3.6" />
-                                  <path d="M6.2 6.2C3.9 7.5 2.4 9.5 2 12c1 3 5 7 10 7 1.3 0 2.5-.3 3.6-.8" />
-                                </>
-                              ) : (
-                                <>
-                                  <path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" />
-                                  <circle cx="12" cy="12" r="3" />
-                                </>
-                              )}
-                            </svg>
-                          </button>
-                        ) : null}
-                      </div>
-                    </div>
-                    <label className={labelClass} htmlFor="brevo-sender-name">
-                      Sender name
-                      <input
-                        id="brevo-sender-name"
-                        className={fieldClass}
-                        value={notificationDraft.email_sender_name}
-                        onChange={(event) => setNotificationDraft((draft) => ({ ...draft, email_sender_name: event.target.value }))}
-                      />
-                    </label>
-                    <label className={labelClass} htmlFor="brevo-sender-email">
-                      Sender email
-                      <input
-                        id="brevo-sender-email"
-                        type="email"
-                        className={fieldClass}
-                        value={notificationDraft.email_sender_email}
-                        onChange={(event) => setNotificationDraft((draft) => ({ ...draft, email_sender_email: event.target.value }))}
-                      />
-                    </label>
-                  </section>
                 </div>
+                <section className="space-y-5 rounded-2xl border border-paper-200 bg-white p-5 shadow-xs sm:p-6">
+                  <div>
+                    <h2 className="font-display text-xl font-semibold text-ink-950">
+                      Email delivery
+                    </h2>
+                    <p className="mt-1 text-sm text-ink-600">
+                      Set the Google Apps Script web app that delivers order and newsletter emails.
+                    </p>
+                  </div>
+                  <label className={labelClass} htmlFor="google-apps-script-url">
+                    Google Apps Script web app URL
+                    <input
+                      id="google-apps-script-url"
+                      type="url"
+                      className={fieldClass}
+                      value={googleAppsScriptUrl}
+                      onChange={(event) => setGoogleAppsScriptUrl(event.target.value)}
+                      placeholder="https://script.google.com/macros/s/.../exec"
+                    />
+                  </label>
+                  <label className={labelClass} htmlFor="email-sender-email">
+                    Sender email address
+                    <input
+                      id="email-sender-email"
+                      type="email"
+                      className={fieldClass}
+                      value={emailSenderEmail}
+                      onChange={(event) => setEmailSenderEmail(event.target.value)}
+                      placeholder="orders@example.com"
+                    />
+                  </label>
+                  <p className="-mt-3 text-sm text-ink-500">
+                    This address must be a verified send-as alias for the Google account that owns the Apps Script. The script must use the provided senderEmail value when sending.
+                  </p>
+                </section>
                 <button className={primaryButton} type="submit" disabled={busy}>
                   {busy ? "Saving…" : "Save notification settings"}
                 </button>

@@ -15,6 +15,7 @@ if (!rustfsBuckets.length) {
 }
 
 const nextConfig: NextConfig = {
+  allowedDevOrigins: [rustfsUrl.hostname],
   images: {
     dangerouslyAllowLocalIP: ["localhost", "127.0.0.1", "::1"].includes(rustfsUrl.hostname),
     remotePatterns: rustfsBuckets.map((bucket) => ({
