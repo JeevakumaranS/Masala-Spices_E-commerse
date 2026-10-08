@@ -43,9 +43,10 @@ const PROMISES = [
   "Sealed, dated and dispatched the same week",
 ];
 
+const ABOUT_HERO_IMAGE = "/images/about-hero.png";
+
 export default async function AboutPage() {
   const [products, aboutImage] = await Promise.all([getProducts(), getAboutImage()]);
-  const heroImage = products.find((product) => product.slug === "sambar-masala")?.images[0]?.url;
   const storyImage = aboutImage || products.find((product) => product.slug === "biriyani-masala")?.images[0]?.url;
 
   return (
@@ -77,9 +78,9 @@ export default async function AboutPage() {
         <Reveal delay={120}>
           <div className="mt-10 overflow-hidden rounded-3xl border border-paper-200 shadow-md">
             <SmartImage
-              src={heroImage}
-              alt="Assorted whole spices, seeds and ground masalas arranged on a pale wooden table"
-              aspect="aspect-video"
+              src={ABOUT_HERO_IMAGE}
+              alt="Fresh spices being ground by hand in a traditional stone mortar"
+              aspect="aspect-[8/3]"
               priority
               sizes="(max-width: 1024px) 100vw, 1200px"
               wrapperClassName="rounded-3xl"
