@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, select
 from sqlalchemy.dialects.postgresql import insert
@@ -42,6 +42,11 @@ class WatchlistSyncRequest(BaseModel):
 
 def _guest_id(request: Request) -> UUID:
     return request.state.guest_id
+
+
+@router.get("/api/guest/session", status_code=204)
+async def establish_guest_session() -> Response:
+    return Response(status_code=204)
 
 
 async def _read_cart(db: AsyncSession, guest_id: UUID) -> list[dict[str, Any]]:

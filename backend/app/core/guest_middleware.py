@@ -13,10 +13,20 @@ from starlette.responses import Response
 
 from app.core.database import guest_sessions_table, session_factory, _uuid7_default
 
+GUEST_IDENTITY_ROUTES = {
+    ("/api/guest/session", "GET"),
+    ("/api/cart", "GET"),
+    ("/api/cart", "PUT"),
+    ("/api/watchlist", "GET"),
+    ("/api/watchlist", "PUT"),
+    ("/api/orders", "POST"),
+}
+
 
 class GuestIdentityMiddleware(BaseHTTPMiddleware):
     async def dispatch(self, request: Request, call_next) -> Response:
-        if not request.url.path.startswith("/api/"):
+        path = request.url.path.rstrip("/")
+        if (path, request.method) not in GUEST_IDENTITY_ROUTES:
             return await call_next(request)
 
         raw_guest_id = request.cookies.get("guest_id")

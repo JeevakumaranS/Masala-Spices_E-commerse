@@ -58,6 +58,7 @@ def test_guest_cart_and_watchlist_tables_have_guest_scoped_keys() -> None:
 def test_guest_routes_are_registered() -> None:
     paths = set(create_app().openapi()["paths"])
 
+    assert "/api/guest/session" in paths
     assert "/api/cart" in paths
     assert "/api/watchlist" in paths
 
@@ -82,27 +83,43 @@ def test_guest_cart_and_watchlist_endpoints_return_server_owned_data(monkeypatch
     assert watchlist_response.status_code == 200
     assert watchlist_response.json() == []
     assert cart_response.cookies.get("guest_id") is not None
+    assert "set-cookie" not in watchlist_response.headers
     assert sessions.calls == ["execute", "commit", "execute", "commit"]
 
 
-def test_api_request_creates_uuid7_cookie_and_tracks_existing_guest(monkeypatch) -> None:
+def test_guest_session_endpoint_creates_uuid7_cookie_and_tracks_existing_guest(monkeypatch) -> None:
     from app.core import guest_middleware
 
     sessions = _SessionFactory()
     monkeypatch.setattr(guest_middleware, "session_factory", sessions)
     with TestClient(create_app()) as client:
-        first_response = client.get("/api/guest-cookie-check")
+        first_response = client.get("/api/guest/session")
         cookie = first_response.cookies.get("guest_id")
+        assert first_response.status_code == 204
         assert cookie is not None
         assert UUID(cookie).version == 7
         assert "httponly" in first_response.headers["set-cookie"].lower()
         assert "samesite=lax" in first_response.headers["set-cookie"].lower()
         assert "max-age=15552000" in first_response.headers["set-cookie"].lower()
 
-        second_response = client.get("/api/guest-cookie-check")
-        assert second_response.status_code == 404
+        second_response = client.get("/api/guest/session")
+        assert second_response.status_code == 204
+        assert client.cookies.get("guest_id") == cookie
         assert "set-cookie" not in second_response.headers
     assert sessions.calls == ["execute", "commit", "execute", "commit"]
+
+
+def test_non_guest_api_request_does_not_create_guest_session(monkeypatch) -> None:
+    from app.core import guest_middleware
+
+    sessions = _SessionFactory()
+    monkeypatch.setattr(guest_middleware, "session_factory", sessions)
+    with TestClient(create_app()) as client:
+        response = client.get("/api/guest-cookie-check")
+
+    assert response.status_code == 404
+    assert "set-cookie" not in response.headers
+    assert sessions.calls == []
 
 
 def test_guest_cookie_is_secure_in_production(monkeypatch) -> None:
@@ -111,6 +128,6 @@ def test_guest_cookie_is_secure_in_production(monkeypatch) -> None:
     monkeypatch.setenv("APP_ENV", "production")
     monkeypatch.setattr(guest_middleware, "session_factory", _SessionFactory())
     with TestClient(create_app()) as client:
-        response = client.get("/api/guest-cookie-check")
+        response = client.get("/api/guest/session")
 
     assert "; secure" in response.headers["set-cookie"].lower()
