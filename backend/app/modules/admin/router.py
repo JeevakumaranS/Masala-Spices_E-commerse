@@ -13,6 +13,7 @@ from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.security import HTTPAuthorizationCredentials
+from httpx import InvalidURL, URL
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from sqlalchemy import delete, func, insert, select, text, update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
@@ -41,7 +42,7 @@ from app.modules.admin.auth import bearer, hash_password, issue_token, require_a
 from app.modules.admin.schemas import AdminOverviewResponse, LoginRequest, RegisterAdminRequest
 from app.modules.analytics.router import analytics_summary
 from app.modules.categories.router import category_response
-from app.modules.notifications.brevo import send_order_status_email
+from app.modules.notifications.email import send_order_status_email
 from app.modules.notifications.settings import get_notification_settings
 from app.modules.orders.shipping import calculate_shipping
 from app.modules.products.router import hydrate_products
@@ -484,22 +485,52 @@ class UpdateNotificationSettingsRequest(BaseModel):
     sms_account_sid: str = Field(default="", max_length=255)
     sms_auth_token: str | None = Field(default=None, max_length=500)
     sms_sender_phone: str = Field(default="", max_length=32)
-    email_enabled: bool
-    email_api_key: str | None = Field(default=None, max_length=500)
-    email_sender_name: str = Field(default="", max_length=255)
-    email_sender_email: str = Field(default="", max_length=320)
+    google_apps_script_url: str = Field(default="", max_length=2048)
+    email_sender_email: str = Field(default="", max_length=254)
 
     @field_validator(
         "sms_account_sid",
         "sms_sender_phone",
-        "email_sender_name",
-        "email_sender_email",
         "sms_auth_token",
-        "email_api_key",
+        "google_apps_script_url",
+        "email_sender_email",
     )
     @classmethod
     def trim_notification_values(cls, value: str | None) -> str | None:
         return value.strip() if value is not None else None
+
+    @field_validator("google_apps_script_url")
+    @classmethod
+    def validate_google_apps_script_url(cls, value: str) -> str:
+        if not value:
+            return value
+        try:
+            parsed = URL(value)
+        except InvalidURL as error:
+            raise ValueError(
+                "Use the HTTPS URL of a deployed Google Apps Script web app."
+            ) from error
+        if (
+            parsed.scheme != "https"
+            or parsed.host != "script.google.com"
+            or not parsed.path.startswith("/macros/s/")
+            or not parsed.path.endswith("/exec")
+            or parsed.username
+            or parsed.password
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "Use the HTTPS URL of a deployed Google Apps Script web app."
+            )
+        return value
+
+    @field_validator("email_sender_email")
+    @classmethod
+    def validate_email_sender_email(cls, value: str) -> str:
+        if value and not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", value):
+            raise ValueError("Enter a valid sender email address.")
+        return value.casefold()
 
 
 @router.get("/integration-settings", dependencies=[Depends(require_admin)])
@@ -523,10 +554,8 @@ async def update_admin_notification_settings(
             sms_account_sid=payload.sms_account_sid,
             sms_auth_token=payload.sms_auth_token,
             sms_sender_phone=payload.sms_sender_phone,
-            email_enabled=payload.email_enabled,
-            email_api_key=payload.email_api_key,
-            email_sender_name=payload.email_sender_name,
-            email_sender_email=payload.email_sender_email,
+            google_apps_script_url=payload.google_apps_script_url,
+            email_sender_email=payload.email_sender_email or None,
         )
         .on_conflict_do_update(
             index_elements=[notification_settings_table.c.id],
@@ -538,12 +567,7 @@ async def update_admin_notification_settings(
                     notification_settings_table.c.sms_auth_token,
                 ),
                 "sms_sender_phone": excluded.sms_sender_phone,
-                "email_enabled": excluded.email_enabled,
-                "email_api_key": func.coalesce(
-                    excluded.email_api_key,
-                    notification_settings_table.c.email_api_key,
-                ),
-                "email_sender_name": excluded.email_sender_name,
+                "google_apps_script_url": excluded.google_apps_script_url,
                 "email_sender_email": excluded.email_sender_email,
             },
         )

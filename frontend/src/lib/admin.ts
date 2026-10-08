@@ -132,17 +132,13 @@ export type AdminRegistrationResult = {
 
 export type AdminIntegrationSettings = {
   sms_enabled: boolean;
-  email_enabled: boolean;
   sms_configured: boolean;
-  email_configured: boolean;
-  email_api_key_configured: boolean;
   sms_account_sid_configured: boolean;
   sms_account_sid: string;
   sms_auth_token: string;
-  email_sender_name: string;
-  email_sender_email: string;
   sms_sender_phone: string;
-  email_api_key: string;
+  google_apps_script_url: string;
+  email_sender_email: string;
 };
 
 export type HomepageMediaUpload = {
