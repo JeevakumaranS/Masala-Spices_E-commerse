@@ -128,7 +128,7 @@ type CheckoutValues = z.infer<typeof checkoutSchema>;
 
 type OrderResponse = {
   order_number?: string;
-  email_confirmation_status?: "sent" | "failed" | "disabled";
+  email_confirmation_status?: "pending" | "sent" | "failed" | "disabled";
   sms_confirmation_status?: "sent" | "failed" | "disabled";
   subtotal?: number;
   shipping_amount?: number;
@@ -167,7 +167,7 @@ function getOrderErrorMessage(
 export type CheckoutReceipt = {
   lines: CartLine[];
   orderNumber: string | null;
-  emailConfirmationStatus: "sent" | "failed" | "disabled";
+  emailConfirmationStatus: "pending" | "sent" | "failed" | "disabled";
   smsConfirmationStatus: "sent" | "failed" | "disabled";
   subtotal: number;
   shipping: number;
@@ -344,7 +344,7 @@ export function CheckoutForm({ onPlaced }: Props) {
       const receipt: CheckoutReceipt = {
         lines: checkoutLines,
         orderNumber: typeof data.order_number === "string" ? data.order_number : null,
-        emailConfirmationStatus: data.email_confirmation_status ?? "failed",
+        emailConfirmationStatus: data.email_confirmation_status ?? "pending",
         smsConfirmationStatus: data.sms_confirmation_status ?? "failed",
         subtotal: data.subtotal ?? checkoutSubtotal,
         shipping: data.shipping_amount ?? checkoutShipping,

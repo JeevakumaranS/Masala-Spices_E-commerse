@@ -41,7 +41,7 @@ Use Python 3.12, matching `Dockerfile`. After activating the virtual environment
 and installing `requirements.txt`, run the application from this directory with:
 
 ```bash
-python -m uvicorn app.main:app --reload --port 8080
+python -m uvicorn app.main:app --reload --port 8080 --no-access-log
 ```
 
 ## Environment and database setup

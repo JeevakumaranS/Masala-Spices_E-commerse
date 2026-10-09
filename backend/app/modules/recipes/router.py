@@ -3,7 +3,7 @@
 import asyncio
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -33,9 +33,16 @@ async def _recipe_response(recipe: dict[str, Any]) -> dict[str, Any]:
 async def list_recipes(
     cuisine: str | None = None,
     dish_type: str | None = None,
+    slugs: str | None = Query(default=None, max_length=4096),
+    limit: int | None = Query(default=None, ge=1, le=100),
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
+    requested_slugs = list(dict.fromkeys(
+        slug.strip() for slug in (slugs or "").split(",") if slug.strip()
+    ))
     query = select(recipes_table).order_by(recipes_table.c.title)
+    if requested_slugs:
+        query = query.where(recipes_table.c.slug.in_(requested_slugs))
     result = await db.execute(query)
     filtered = [dict(row) for row in result.mappings()]
     if cuisine:
@@ -46,6 +53,8 @@ async def list_recipes(
             for item in filtered
             if item["dish_type"].lower() == dish_type.lower()
         ]
+    if limit is not None:
+        filtered = filtered[:limit]
     return {
         "items": [await _recipe_response(item) for item in filtered],
         "page": 1,

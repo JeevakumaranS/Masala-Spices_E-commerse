@@ -59,7 +59,7 @@ class Order(BaseModel):
     customer_name: str
     phone: str
     email: str | None = None
-    email_confirmation_status: Literal["sent", "failed", "disabled"] | None = None
+    email_confirmation_status: Literal["pending", "sent", "failed", "disabled"] | None = None
     status: OrderStatusName = "placed"
     payment_status: str = "pending_offline"
     total: float

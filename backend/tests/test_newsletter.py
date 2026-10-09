@@ -3,6 +3,7 @@
 import asyncio
 from collections import defaultdict, deque
 from typing import Any
+from uuid import uuid4
 
 import pytest
 from fastapi import HTTPException, Request
@@ -176,6 +177,91 @@ def test_order_confirmation_email_uses_apps_script(
     assert request["subject"] == "Order confirmation — Masala House"
     assert "Thank you, Masala Customer" in request["html"]
     assert "Sambar Masala" in request["html"]
+
+
+def test_order_confirmation_background_task_reloads_order_in_fresh_session(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    order_id = uuid4()
+    captured_order: dict[str, Any] = {}
+
+    class Result:
+        def __init__(self, rows: list[dict[str, Any]]) -> None:
+            self.rows = rows
+
+        def mappings(self) -> "Result":
+            return self
+
+        def first(self) -> dict[str, Any] | None:
+            return self.rows[0] if self.rows else None
+
+        def __iter__(self):
+            return iter(self.rows)
+
+    class Session:
+        closed = False
+        executions = 0
+
+        async def __aenter__(self) -> "Session":
+            return self
+
+        async def __aexit__(self, *_args: object) -> None:
+            self.closed = True
+
+        async def execute(self, _statement: object) -> Result:
+            self.executions += 1
+            if self.executions == 1:
+                return Result([{
+                    "id": order_id,
+                    "order_number": "MAS-10001",
+                    "customer_name": "Customer",
+                    "email": "customer@example.com",
+                    "subtotal": 120,
+                    "discount_amount": 0,
+                    "shipping_amount": 0,
+                    "total": 120,
+                }])
+            return Result([{
+                "name": "Sambar Masala",
+                "pack_size": "100 g",
+                "qty": 1,
+                "line_total": 120,
+            }])
+
+    session = Session()
+
+    async def send(order: dict[str, Any]) -> str:
+        assert session.closed
+        captured_order.update(order)
+        return "sent"
+
+    monkeypatch.setattr(email_notifications, "session_factory", lambda: session)
+    monkeypatch.setattr(email_notifications, "send_order_confirmation_email", send)
+
+    asyncio.run(email_notifications.send_order_confirmation_email_background(order_id))
+
+    assert captured_order["id"] == order_id
+    assert captured_order["items"][0]["name"] == "Sambar Masala"
+
+
+def test_order_confirmation_background_task_logs_failures(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    class FailedSession:
+        async def __aenter__(self) -> "FailedSession":
+            raise RuntimeError("database unavailable")
+
+        async def __aexit__(self, *_args: object) -> None:
+            return None
+
+    monkeypatch.setattr(email_notifications, "session_factory", FailedSession)
+
+    asyncio.run(
+        email_notifications.send_order_confirmation_email_background(uuid4())
+    )
+
+    assert "Order confirmation background task failed." in caplog.text
 
 
 def test_newsletter_signup_attempts_email_for_unconfirmed_subscription(

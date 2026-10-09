@@ -6,7 +6,14 @@ import { HeroImageCarousel } from "@/components/HeroImageCarousel";
 import { ProductCard } from "@/components/ProductCard";
 import { ProductRail } from "@/components/ProductRail";
 import { SmartImage } from "@/components/ui/SmartImage";
-import { getAllCombos, getCategories, getHeroImages, getHomepageContent, getProducts, getRecipes } from "@/lib/api";
+import {
+  getAllCombos,
+  getCategories,
+  getHeroImages,
+  getHomepageContent,
+  getProductsBySlugsAndCategories,
+  getRecipes,
+} from "@/lib/api";
 import {
   ArrowRightIcon,
 } from "@/components/ui/icons";
@@ -50,19 +57,28 @@ function CategoryLink({ category }: { category: HomepageCategory }) {
   );
 }
 
-export const dynamic = "force-dynamic";
+export const revalidate = 60;
 
 export default async function HomePage() {
-  const [categories, products, recipes, comboProducts, heroImages, homepageContent] = await Promise.all([
+  const [categories, heroImages, homepageContent] = await Promise.all([
     getCategories(),
-    getProducts(),
-    getRecipes(),
-    getAllCombos(),
     getHeroImages(),
     getHomepageContent(),
   ]);
 
   const configuredBestsellers = homepageContent.bestsellers.product_slugs;
+  const categoryImageSlugs = homepageContent.categories.items.map(
+    (item) => item.image_product_slug,
+  );
+  const [products, comboProducts, recipes] = await Promise.all([
+    getProductsBySlugsAndCategories(
+      [...configuredBestsellers, ...categoryImageSlugs],
+      homepageContent.categories.items.map((item) => item.slug),
+    ),
+    getAllCombos(homepageContent.combos.product_slugs),
+    getRecipes(homepageContent.recipes.recipe_slugs),
+  ]);
+
   const bestsellers = configuredBestsellers.length
     ? configuredBestsellers.flatMap((slug) =>
         products.filter((product) => product.slug === slug && !product.is_combo),

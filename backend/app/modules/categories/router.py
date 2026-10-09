@@ -2,7 +2,7 @@
 
 import asyncio
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -25,7 +25,13 @@ async def category_response(row: object) -> dict:
 
 
 @router.get("", response_model=list[Category])
-async def list_categories(db: AsyncSession = Depends(get_db)) -> list[dict]:
+async def list_categories(
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    response.headers["Cache-Control"] = (
+        "public, max-age=0, s-maxage=60, stale-while-revalidate=300"
+    )
     result = await db.execute(select(categories_table).order_by(categories_table.c.name))
     return await asyncio.gather(*(category_response(row) for row in result.mappings()))
 
