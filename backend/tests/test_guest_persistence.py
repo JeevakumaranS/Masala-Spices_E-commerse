@@ -80,6 +80,7 @@ def test_guest_cart_and_watchlist_endpoints_return_server_owned_data(monkeypatch
 
     assert cart_response.status_code == 200
     assert cart_response.json() == []
+    assert cart_response.headers["cache-control"] == "private, no-store"
     assert watchlist_response.status_code == 200
     assert watchlist_response.json() == []
     assert cart_response.cookies.get("guest_id") is not None

@@ -57,7 +57,7 @@ python3.12 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
 alembic upgrade head
-python -m uvicorn app.main:app --reload --port 8000
+python -m uvicorn app.main:app --reload --port 8000 --no-access-log
 ```
 
 Start the frontend in a second terminal:

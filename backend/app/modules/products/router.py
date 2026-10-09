@@ -6,7 +6,8 @@ from typing import Any
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, insert, select
+from sqlalchemy import Text, cast, func, insert, or_, select
+from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import (
@@ -37,23 +38,53 @@ async def list_products(
     max_price: float | None = Query(default=None, ge=0),
     pack_size: str | None = Query(default=None),
     search: str | None = Query(default=None),
+    slugs: str | None = Query(default=None, max_length=4096),
+    categories: str | None = Query(default=None, max_length=4096),
     page: int = 1,
     page_size: int = 12,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
-    product_result = await db.execute(select(products_table).order_by(products_table.c.name))
-    combo_result = await db.execute(select(combos_table).order_by(combos_table.c.name))
+    requested_slugs = list(dict.fromkeys(
+        slug.strip() for slug in (slugs or "").split(",") if slug.strip()
+    ))
+    requested_categories = list(dict.fromkeys(
+        category_slug.strip()
+        for category_slug in (categories or "").split(",")
+        if category_slug.strip()
+    ))
+
+    product_query = select(products_table).order_by(products_table.c.name)
+    product_filters = []
+    if requested_slugs:
+        product_filters.append(products_table.c.slug.in_(requested_slugs))
+    if requested_categories:
+        product_filters.append(
+            cast(products_table.c.categories, ARRAY(Text)).overlap(requested_categories)
+        )
+    if product_filters:
+        product_query = product_query.where(or_(*product_filters))
+    product_result = await db.execute(product_query)
+
+    combo_query = select(combos_table).order_by(combos_table.c.name)
+    if requested_slugs:
+        combo_result = await db.execute(
+            combo_query.where(combos_table.c.slug.in_(requested_slugs))
+        )
+    elif not requested_categories:
+        combo_result = await db.execute(combo_query)
+    else:
+        combo_result = None
     filtered = [
         {**dict(row), "is_combo": False}
         for row in product_result.mappings()
-    ] + [
+    ] + ([
         {
             **dict(row),
             "is_combo": True,
             "ingredients": [],
         }
         for row in combo_result.mappings()
-    ]
+    ] if combo_result is not None else [])
     if category:
         if category == "combos-packs":
             filtered = [item for item in filtered if item.get("is_combo")]

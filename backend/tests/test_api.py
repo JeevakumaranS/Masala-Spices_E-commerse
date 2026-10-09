@@ -798,6 +798,15 @@ def test_public_collection_endpoints(
     assert isinstance(items, list)
 
 
+def test_category_listing_has_short_shared_cache(client: TestClient) -> None:
+    response = client.get("/api/categories")
+
+    assert response.status_code == 200, response.text
+    assert response.headers["cache-control"] == (
+        "public, max-age=0, s-maxage=60, stale-while-revalidate=300"
+    )
+
+
 def test_blog_admin_crud_requires_authentication(client: TestClient) -> None:
     post_id = uuid4()
     payload = {
@@ -834,7 +843,9 @@ def test_active_coupon_listing_contains_only_public_offer_fields(
     response = client.get("/api/coupons/active")
 
     assert response.status_code == 200, response.text
-    assert response.headers["cache-control"] == "no-store"
+    assert response.headers["cache-control"] == (
+        "public, max-age=0, s-maxage=30, stale-while-revalidate=30"
+    )
     offers = response.json()
     assert isinstance(offers, list)
     public_fields = {

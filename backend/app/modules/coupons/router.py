@@ -23,7 +23,9 @@ async def list_active_coupons(
     response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> list[dict]:
-    response.headers["Cache-Control"] = "no-store"
+    response.headers["Cache-Control"] = (
+        "public, max-age=0, s-maxage=30, stale-while-revalidate=30"
+    )
     today = date.today()
     result = await db.execute(
         select(

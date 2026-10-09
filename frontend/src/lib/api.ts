@@ -18,7 +18,7 @@ async function fetchJson<T>(
         return response.data;
       },
       ["backend-api"],
-      { revalidate: 300 },
+      { revalidate: 60 },
     );
     return await cachedRequest(path);
   } catch {
@@ -30,7 +30,6 @@ export async function getCategories(): Promise<Category[]> {
   const payload = await fetchJson<{ items?: Category[] } | Category[]>(
     "/api/categories",
     [],
-    false,
   );
   if (!payload) return [];
   return Array.isArray(payload) ? payload : (payload.items ?? []);
@@ -70,7 +69,44 @@ export async function getProducts(category?: string): Promise<Product[]> {
   }
 }
 
-export async function getAllCombos(): Promise<Product[]> {
+export async function getProductsBySlugsAndCategories(
+  slugs: string[],
+  categories: string[],
+): Promise<Product[]> {
+  const uniqueSlugs = [...new Set(slugs.filter(Boolean))];
+  const uniqueCategories = [...new Set(categories.filter(Boolean))];
+  if (!uniqueSlugs.length && !uniqueCategories.length) return [];
+
+  const params = new URLSearchParams({ page: "1", page_size: "100" });
+  if (uniqueSlugs.length) params.set("slugs", uniqueSlugs.join(","));
+  if (uniqueCategories.length) params.set("categories", uniqueCategories.join(","));
+
+  const payload = await fetchJson<{ items?: Product[] } | Product[]>(
+    `/api/products?${params.toString()}`,
+    [],
+  );
+  if (!payload) return [];
+  return Array.isArray(payload) ? payload : (payload.items ?? []);
+}
+
+export async function getAllCombos(slugs?: string[]): Promise<Product[]> {
+  if (slugs) {
+    const uniqueSlugs = [...new Set(slugs.filter(Boolean))];
+    if (!uniqueSlugs.length) return [];
+    const params = new URLSearchParams({
+      category: "combos-packs",
+      page: "1",
+      page_size: "100",
+      slugs: uniqueSlugs.join(","),
+    });
+    const payload = await fetchJson<{ items?: Product[] } | Product[]>(
+      `/api/products?${params.toString()}`,
+      [],
+    );
+    if (!payload) return [];
+    return Array.isArray(payload) ? payload : (payload.items ?? []);
+  }
+
   const pageSize = 100;
   try {
     const firstPage = await apiClient.get<{
@@ -95,7 +131,7 @@ export async function getAllCombos(): Promise<Product[]> {
 }
 
 export async function getActiveOffers(): Promise<ActiveOffer[]> {
-  return (await fetchJson<ActiveOffer[]>("/api/coupons/active", [], false)) ?? [];
+  return (await fetchJson<ActiveOffer[]>("/api/coupons/active", [])) ?? [];
 }
 
 export async function getProduct(slug: string): Promise<Product | null> {
@@ -110,7 +146,7 @@ export type HeroImage = {
 };
 
 export async function getHeroImages(): Promise<HeroImage[]> {
-  return (await fetchJson<HeroImage[]>("/api/hero-images", [], false)) ?? [];
+  return (await fetchJson<HeroImage[]>("/api/hero-images", [])) ?? [];
 }
 
 export async function getAboutImage(): Promise<string | null> {
@@ -158,15 +194,25 @@ export async function getHomepageContent(): Promise<HomepageContent> {
   return (await fetchJson<HomepageContent>(
     "/api/homepage-content",
     DEFAULT_HOMEPAGE_CONTENT,
-    false,
   )) ?? DEFAULT_HOMEPAGE_CONTENT;
 }
 
-export async function getRecipes(): Promise<Recipe[]> {
+export async function getRecipes(slugs?: string[]): Promise<Recipe[]> {
+  if (slugs) {
+    const uniqueSlugs = [...new Set(slugs.filter(Boolean))];
+    if (!uniqueSlugs.length) return [];
+    const params = new URLSearchParams({ slugs: uniqueSlugs.join(",") });
+    const payload = await fetchJson<{ items?: Recipe[] } | Recipe[]>(
+      `/api/recipes?${params.toString()}`,
+      [],
+    );
+    if (!payload) return [];
+    return Array.isArray(payload) ? payload : (payload.items ?? []);
+  }
+
   const payload = await fetchJson<{ items?: Recipe[] } | Recipe[]>(
     "/api/recipes",
     [],
-    false,
   );
   if (!payload) return [];
   return Array.isArray(payload) ? payload : (payload.items ?? []);

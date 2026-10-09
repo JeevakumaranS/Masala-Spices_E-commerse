@@ -8,7 +8,7 @@ from decimal import Decimal
 from typing import Any
 from uuid import uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request
 from sqlalchemy import String, delete, insert, select, text
 from sqlalchemy import update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -40,7 +40,7 @@ from app.modules.orders.shipping import (
     get_international_destination,
     shipping_options_payload,
 )
-from app.modules.notifications.email import send_order_confirmation_email
+from app.modules.notifications.email import send_order_confirmation_email_background
 
 router = APIRouter(prefix="/api/orders", tags=["orders"])
 
@@ -86,6 +86,7 @@ def get_shipping_options() -> dict[str, Any]:
 @router.post("", response_model=Order)
 async def create_order(
     payload: OrderCreateRequest,
+    background_tasks: BackgroundTasks,
     request: Request,
     db: AsyncSession = Depends(get_db),
 ) -> dict[str, Any]:
@@ -303,7 +304,11 @@ async def create_order(
         ],
     }
 
-    order["email_confirmation_status"] = await send_order_confirmation_email(order)
+    order["email_confirmation_status"] = "pending"
+    background_tasks.add_task(
+        send_order_confirmation_email_background,
+        order_id,
+    )
     return order
 
 

@@ -59,21 +59,30 @@ async def _read_cart(db: AsyncSession, guest_id: UUID) -> list[dict[str, Any]]:
     if not stored_items:
         return []
 
-    product_ids = {item["product_id"] for item in stored_items}
-    regular_result = await db.execute(
-        select(products_table).where(products_table.c.id.in_(product_ids))
-    )
-    regular = {
-        row["id"]: {**dict(row), "is_combo": False}
-        for row in regular_result.mappings()
+    regular_ids = {
+        item["product_id"] for item in stored_items if not item["is_combo"]
     }
-    combo_result = await db.execute(
-        select(combos_table).where(combos_table.c.id.in_(product_ids))
-    )
-    combos = {
-        row["id"]: {**dict(row), "is_combo": True, "ingredients": []}
-        for row in combo_result.mappings()
+    combo_ids = {
+        item["product_id"] for item in stored_items if item["is_combo"]
     }
+    regular: dict[UUID, dict[str, Any]] = {}
+    if regular_ids:
+        regular_result = await db.execute(
+            select(products_table).where(products_table.c.id.in_(regular_ids))
+        )
+        regular = {
+            row["id"]: {**dict(row), "is_combo": False}
+            for row in regular_result.mappings()
+        }
+    combos: dict[UUID, dict[str, Any]] = {}
+    if combo_ids:
+        combo_result = await db.execute(
+            select(combos_table).where(combos_table.c.id.in_(combo_ids))
+        )
+        combos = {
+            row["id"]: {**dict(row), "is_combo": True, "ingredients": []}
+            for row in combo_result.mappings()
+        }
     catalog = {**regular, **combos}
     hydrated = {
         item["id"]: item
@@ -125,8 +134,10 @@ async def _read_cart(db: AsyncSession, guest_id: UUID) -> list[dict[str, Any]]:
 @router.get("/api/cart")
 async def get_cart(
     request: Request,
+    response: Response,
     db: AsyncSession = Depends(get_db),
 ) -> list[dict[str, Any]]:
+    response.headers["Cache-Control"] = "private, no-store"
     return await _read_cart(db, _guest_id(request))
 
 

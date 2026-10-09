@@ -3,12 +3,14 @@
 import html
 import logging
 from typing import Any, Literal
+from uuid import UUID
 
 import httpx
+from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 
 from email_service import EmailServiceNotConfigured, send_email
-from app.core.database import session_factory
+from app.core.database import order_items_table, orders_table, session_factory
 from app.modules.notifications.settings import get_notification_settings
 
 logger = logging.getLogger(__name__)
@@ -773,6 +775,47 @@ async def send_order_confirmation_email(
         order,
         "placed",
     )
+
+
+async def send_order_confirmation_email_background(order_id: UUID) -> None:
+    try:
+        async with session_factory() as db:
+            order_result = await db.execute(
+                select(orders_table).where(orders_table.c.id == order_id)
+            )
+            order_row = order_result.mappings().first()
+            if order_row is None:
+                logger.error(
+                    "Could not send order confirmation; order was not found.",
+                    extra={"order_id": str(order_id)},
+                )
+                return
+            order = dict(order_row)
+            items_result = await db.execute(
+                select(order_items_table).where(
+                    order_items_table.c.order_id == order_id
+                )
+            )
+            order["items"] = [
+                dict(item) for item in items_result.mappings()
+            ]
+
+        status = await send_order_confirmation_email(order)
+        if status == "failed":
+            logger.error(
+                "Order confirmation email delivery failed.",
+                extra={"order_id": str(order_id)},
+            )
+        elif status == "disabled":
+            logger.info(
+                "Order confirmation email delivery is disabled.",
+                extra={"order_id": str(order_id)},
+            )
+    except Exception:
+        logger.exception(
+            "Order confirmation background task failed.",
+            extra={"order_id": str(order_id)},
+        )
 
 
 async def send_order_status_email(
